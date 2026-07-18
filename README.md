@@ -19,17 +19,21 @@ curl -fsSL https://raw.githubusercontent.com/ClarkeFL/gantry/main/install.sh | s
 
 What it does, in order:
 
-1. Installs Dokku (official bootstrap) — skipped if `dokku` is already on the box
+1. Runs a system update, then installs Dokku (official bootstrap) — skipped if `dokku`
+   is already on the box — plus the letsencrypt plugin
 2. Downloads the latest `gantry-linux-<arch>` release binary to `/usr/local/bin/gantry`
-3. Runs `gantry init` (interactive, once): asks for the admin password, generates the 2FA
-   secret and prints the `otpauth://` URI — add it to Google Authenticator / 1Password now,
-   it is only shown here
-4. Installs a systemd service: starts on boot, restarts on crash (and after self-update)
+3. Installs a systemd service: starts on boot, restarts on crash (and after self-update)
 
-Then open `http://<server-ip>:8022`. Re-running the installer is safe — it updates the
-binary and skips setup.
+Then open `http://<server-ip>:8022`, **create your admin account** (email + password —
+registration is only possible while no account exists), and **enable 2FA in Settings**
+(scan the QR, confirm a code). Login is two-step: email + password, then the 6-digit code.
 
-Lost the 2FA secret or password? `rm /var/lib/gantry/auth.json && gantry init && systemctl restart gantry`.
+Re-running the installer is safe — it updates the binary and skips what's done
+(that's also the "repair" path). `sh uninstall.sh [--purge]` removes the panel and
+leaves dokku + your apps alone.
+
+Locked out? `rm /var/lib/gantry/auth.json && systemctl restart gantry` → register again
+(or `gantry init` for CLI setup).
 
 ## Dev
 

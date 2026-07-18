@@ -35,6 +35,10 @@
 		leEmailSet: boolean;
 		jobs: Job[];
 		nativeCron: string;
+		repo: string;
+		ref: string;
+		dockerfile: string;
+		image: string;
 	};
 
 	const name = $derived(page.params.name!);
@@ -66,6 +70,9 @@
 	let deploying = $state(false);
 	let deployLines = $state<string[]>([]);
 	let image = $state('');
+	let deployRepo = $state('');
+	let deployRef = $state('');
+	let deployDf = $state('');
 	let stopDeploy: (() => void) | null = null;
 
 	// domains + ssl
@@ -87,6 +94,10 @@
 		origEnv = { ...d.env };
 		jobs = d.jobs.map((j) => ({ ...j }));
 		category = d.category;
+		image = d.image ?? '';
+		deployRepo = d.repo ?? '';
+		deployRef = d.ref ?? '';
+		deployDf = d.dockerfile ?? '';
 
 		const waiting = d.domains.some((x) => !x.dnsOk);
 		// poll while any domain waits on DNS; when all resolve, request the cert once
@@ -145,7 +156,15 @@
 			(l) => {
 				deployLines.push(l);
 			},
-			{ method: 'POST', body: JSON.stringify({ image: image.trim() }) },
+			{
+				method: 'POST',
+				body: JSON.stringify({
+					repo: deployRepo.trim(),
+					ref: deployRef.trim(),
+					dockerfile: deployDf.trim(),
+					image: deployRepo.trim() ? '' : image.trim()
+				})
+			},
 			() => {
 				deploying = false;
 				load();
@@ -551,13 +570,33 @@
 		<Dialog.Header>
 			<Dialog.Title>Deploy {name}</Dialog.Title>
 			<Dialog.Description>
-				Leave the image empty to rebuild from the last deployed source, or give a registry image
-				(e.g. <code>ghcr.io/you/app:latest</code>) for <code>git:from-image</code>.
+				From a GitHub repo (built on the server) or a registry image — the last-used source is
+				prefilled, so hitting Deploy redeploys the latest.
 			</Dialog.Description>
 		</Dialog.Header>
-		<div class="flex gap-2">
-			<Input class="flex-1 font-mono text-xs" placeholder="ghcr.io/you/app:latest (optional)" bind:value={image} disabled={deploying} />
-			<Button onclick={deploy} disabled={deploying}>
+		<div class="grid gap-3">
+			<div class="grid gap-1">
+				<Label for="dep-repo">GitHub repository</Label>
+				<Input id="dep-repo" class="font-mono text-xs" placeholder="https://github.com/you/repo" bind:value={deployRepo} disabled={deploying} />
+			</div>
+			{#if deployRepo.trim()}
+				<div class="grid grid-cols-2 gap-3">
+					<div class="grid gap-1">
+						<Label for="dep-ref">Branch <span class="text-muted-foreground">(optional)</span></Label>
+						<Input id="dep-ref" class="font-mono text-xs" placeholder="main" bind:value={deployRef} disabled={deploying} />
+					</div>
+					<div class="grid gap-1">
+						<Label for="dep-df">Dockerfile path <span class="text-muted-foreground">(optional)</span></Label>
+						<Input id="dep-df" class="font-mono text-xs" placeholder="Dockerfile" bind:value={deployDf} disabled={deploying} />
+					</div>
+				</div>
+			{:else}
+				<div class="grid gap-1">
+					<Label for="dep-img">…or Docker image</Label>
+					<Input id="dep-img" class="font-mono text-xs" placeholder="ghcr.io/you/app:latest" bind:value={image} disabled={deploying} />
+				</div>
+			{/if}
+			<Button onclick={deploy} disabled={deploying} class="w-fit">
 				<RocketIcon class="size-4" />
 				{deploying ? 'Deploying…' : 'Deploy'}
 			</Button>

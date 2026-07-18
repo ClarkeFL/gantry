@@ -7,7 +7,6 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Card from '$lib/components/ui/card';
 
-	let totpSecret = $state('');
 	let githubUser = $state('');
 	let githubTokenMasked = $state('');
 	let qrBust = $state(0);
@@ -18,9 +17,14 @@
 	let confirmPw = $state('');
 	let savingPw = $state(false);
 
-	// totp regen
-	let regenPw = $state('');
-	let regening = $state(false);
+	// 2FA
+	let totpEnabled = $state(false);
+	let totpPending = $state(false);
+	let pendingSecret = $state('');
+	let verifyCode = $state('');
+	let disablePw = $state(false);
+	let disablePassword = $state('');
+	let totpBusy = $state(false);
 
 	// github
 	let ghUser = $state('');
@@ -37,12 +41,62 @@
 
 	onMount(async () => {
 		const s = await api('/settings');
-		totpSecret = s.totpSecret;
 		githubUser = s.githubUser;
 		githubTokenMasked = s.githubToken;
 		ghUser = s.githubUser;
 		leEmail = s.leEmail;
+		totpEnabled = s.totpEnabled;
+		totpPending = s.totpPending;
+		pendingSecret = s.pendingSecret ?? '';
 	});
+
+	async function startTotpSetup() {
+		totpBusy = true;
+		try {
+			const res = await api('/settings/totp/setup', { method: 'POST' });
+			pendingSecret = res.secret;
+			totpPending = true;
+			verifyCode = '';
+			qrBust = Date.now();
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			totpBusy = false;
+		}
+	}
+
+	async function verifyTotp(e: SubmitEvent) {
+		e.preventDefault();
+		totpBusy = true;
+		try {
+			await api('/settings/totp/verify', { method: 'POST', body: JSON.stringify({ code: verifyCode }) });
+			totpEnabled = true;
+			totpPending = false;
+			pendingSecret = '';
+			toast.success('Two-factor authentication is on — codes required at every login');
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			totpBusy = false;
+		}
+	}
+
+	async function disableTotp(e: SubmitEvent) {
+		e.preventDefault();
+		if (!confirm('Disable 2FA? Login falls back to email + password only.')) return;
+		totpBusy = true;
+		try {
+			await api('/settings/totp/disable', { method: 'POST', body: JSON.stringify({ password: disablePassword }) });
+			totpEnabled = false;
+			disablePw = false;
+			disablePassword = '';
+			toast.success('Two-factor authentication disabled');
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			totpBusy = false;
+		}
+	}
 
 	async function saveLeEmail(e: SubmitEvent) {
 		e.preventDefault();
@@ -78,26 +132,6 @@
 		}
 	}
 
-	async function regenTotp(e: SubmitEvent) {
-		e.preventDefault();
-		if (!confirm('Old 2FA codes stop working immediately. Continue?')) return;
-		regening = true;
-		try {
-			const res = await api('/settings/totp', {
-				method: 'POST',
-				body: JSON.stringify({ password: regenPw })
-			});
-			totpSecret = res.secret;
-			qrBust = Date.now();
-			regenPw = '';
-			toast.success('New 2FA secret generated — scan the new QR code now');
-		} catch (e) {
-			toast.error(msg(e));
-		} finally {
-			regening = false;
-		}
-	}
-
 	async function saveGitHub(e: SubmitEvent) {
 		e.preventDefault();
 		savingGh = true;
@@ -123,30 +157,67 @@
 
 	<Card.Root>
 		<Card.Header>
-			<Card.Title class="text-base">Two-factor authentication</Card.Title>
-			<Card.Description>Scan the QR code with Google Authenticator, 1Password, Authy…</Card.Description>
+			<Card.Title class="flex items-center gap-2 text-base">
+				Two-factor authentication
+				{#if totpEnabled}
+					<span class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-500">on</span>
+				{:else}
+					<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-500">off</span>
+				{/if}
+			</Card.Title>
+			<Card.Description>
+				{totpEnabled
+					? 'A code from your authenticator app is required at every login.'
+					: 'Strongly recommended — this panel is reachable from the internet.'}
+			</Card.Description>
 		</Card.Header>
-		<Card.Content class="flex flex-wrap items-start gap-6">
-			<img
-				src="/api/settings/totp.png?v={qrBust}"
-				alt="TOTP QR code"
-				width="180"
-				height="180"
-				class="rounded-lg border bg-white p-2"
-			/>
-			<div class="grid min-w-64 flex-1 gap-4">
-				<div class="grid gap-1">
-					<Label>Secret (manual entry)</Label>
-					<code class="bg-muted rounded px-2 py-1.5 text-xs break-all">{totpSecret}</code>
-				</div>
-				<form onsubmit={regenTotp} class="grid gap-2">
-					<Label for="regen-pw">Regenerate secret (enter password to confirm)</Label>
-					<div class="flex gap-2">
-						<Input id="regen-pw" type="password" bind:value={regenPw} required placeholder="Current password" />
-						<Button type="submit" variant="outline" disabled={regening}>Regenerate</Button>
+		<Card.Content class="grid gap-4">
+			{#if totpPending}
+				<div class="flex flex-wrap items-start gap-6">
+					<img
+						src="/api/settings/totp.png?v={qrBust}"
+						alt="TOTP QR code"
+						width="180"
+						height="180"
+						class="rounded-lg border bg-white p-2"
+					/>
+					<div class="grid min-w-64 flex-1 gap-3">
+						<p class="text-muted-foreground text-sm">
+							1. Scan with Google Authenticator, 1Password, Authy…<br />
+							2. Enter the 6-digit code it shows to confirm.
+						</p>
+						<div class="grid gap-1">
+							<Label>Secret (manual entry)</Label>
+							<code class="bg-muted rounded px-2 py-1.5 text-xs break-all">{pendingSecret}</code>
+						</div>
+						<form onsubmit={verifyTotp} class="flex gap-2">
+							<Input
+								inputmode="numeric"
+								maxlength={6}
+								placeholder="123456"
+								bind:value={verifyCode}
+								required
+								class="w-32 font-mono tracking-widest"
+							/>
+							<Button type="submit" disabled={totpBusy}>Confirm & enable</Button>
+						</form>
 					</div>
-				</form>
-			</div>
+				</div>
+			{:else if totpEnabled}
+				{#if disablePw}
+					<form onsubmit={disableTotp} class="flex max-w-sm gap-2">
+						<Input type="password" bind:value={disablePassword} required placeholder="Current password" />
+						<Button type="submit" variant="destructive" disabled={totpBusy}>Disable</Button>
+					</form>
+				{:else}
+					<div class="flex gap-2">
+						<Button variant="outline" onclick={startTotpSetup} disabled={totpBusy}>Regenerate secret</Button>
+						<Button variant="ghost" class="text-destructive" onclick={() => (disablePw = true)}>Disable 2FA</Button>
+					</div>
+				{/if}
+			{:else}
+				<Button class="w-fit" onclick={startTotpSetup} disabled={totpBusy}>Enable two-factor authentication</Button>
+			{/if}
 		</Card.Content>
 	</Card.Root>
 

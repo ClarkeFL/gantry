@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
 	import { Button } from '$lib/components/ui/button';
 	import { toast } from 'svelte-sonner';
@@ -10,6 +11,7 @@
 	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import ArchiveIcon from '@lucide/svelte/icons/archive';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import CopyIcon from '@lucide/svelte/icons/copy';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -26,15 +28,21 @@
 		{ href: '/', label: 'Overview', icon: GaugeIcon },
 		{ href: '/apps', label: 'Apps', icon: LayoutGridIcon },
 		{ href: '/domains', label: 'Domains', icon: GlobeIcon },
-		{ href: '/backups', label: 'Backups', icon: ArchiveIcon },
-		{ href: '/settings', label: 'Settings', icon: SettingsIcon }
+		{ href: '/backups', label: 'Backups', icon: ArchiveIcon }
 	];
+
+	let serverIp = $state('');
 
 	onMount(async () => {
 		try {
 			const me = await api('/me');
+			if (me.setup) {
+				goto('/register');
+				return;
+			}
 			version = me.version;
 			mock = me.mock;
+			serverIp = me.ip ?? '';
 			ready = true;
 			const check = await api('/update/check');
 			latest = check.latest;
@@ -43,6 +51,11 @@
 			// api() redirects to /login on 401
 		}
 	});
+
+	function copyIp() {
+		navigator.clipboard.writeText(serverIp);
+		toast.success('Server IP copied');
+	}
 
 	async function logout() {
 		await api('/logout', { method: 'POST' });
@@ -90,6 +103,25 @@
 				{/each}
 			</nav>
 			<div class="mt-auto grid gap-1 p-2">
+				<a
+					href="/settings"
+					class="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors
+					{page.url.pathname === '/settings'
+						? 'bg-accent text-accent-foreground'
+						: 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'}"
+				>
+					<SettingsIcon class="size-4" /> Settings
+				</a>
+				{#if serverIp}
+					<button
+						class="text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 rounded-md px-3 py-2 font-mono text-xs transition-colors"
+						onclick={copyIp}
+						title="Copy server IP"
+					>
+						<CopyIcon class="size-3.5 shrink-0" />
+						{serverIp}
+					</button>
+				{/if}
 				{#if updateAvailable}
 					<Button
 						variant="ghost"

@@ -37,31 +37,36 @@ func main() {
 		}
 	}
 	if err := loadAuth(); err != nil {
-		log.Fatalf("no auth config at %s — run `gantry init` first (%v)", authPath(), err)
+		log.Printf("no account yet — open the panel to register (looked in %s)", authPath())
 	}
 	loadMeta()
 	loadSettings()
 	startStatsSampler()
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/register", handleRegister)
 	mux.HandleFunc("POST /api/login", handleLogin)
+	mux.HandleFunc("POST /api/login/mfa", handleLoginMFA)
+	mux.HandleFunc("GET /api/me", handleMe)
 	protected := map[string]http.HandlerFunc{
-		"POST /api/logout":               handleLogout,
-		"GET /api/me":                    handleMe,
-		"POST /api/update":               handleUpdate,
-		"GET /api/update/check":          handleUpdateCheck,
-		"GET /api/stats":                 handleStats,
-		"GET /api/domains":               handleDomains,
-		"POST /api/apps":                 handleCreateApp,
-		"POST /api/services":             handleCreateService,
-		"GET /api/settings":              handleSettingsGet,
-		"POST /api/settings/github":      handleGitHubSet,
-		"POST /api/settings/letsencrypt": handleLEEmail,
-		"POST /api/apps/{name}/domains":  handleDomainsMod,
-		"POST /api/apps/{name}/ssl":      handleSSL,
-		"POST /api/settings/password":    handleChangePassword,
-		"POST /api/settings/totp":        handleTOTPRegen,
-		"GET /api/settings/totp.png":     handleTOTPQR,
+		"POST /api/logout":                handleLogout,
+		"POST /api/update":                handleUpdate,
+		"GET /api/update/check":           handleUpdateCheck,
+		"GET /api/stats":                  handleStats,
+		"GET /api/domains":                handleDomains,
+		"POST /api/apps":                  handleCreateApp,
+		"POST /api/services":              handleCreateService,
+		"POST /api/categories":            handleCategoryCreate,
+		"GET /api/settings":               handleSettingsGet,
+		"POST /api/settings/github":       handleGitHubSet,
+		"POST /api/settings/letsencrypt":  handleLEEmail,
+		"POST /api/apps/{name}/domains":   handleDomainsMod,
+		"POST /api/apps/{name}/ssl":       handleSSL,
+		"POST /api/settings/password":     handleChangePassword,
+		"POST /api/settings/totp/setup":   handleTOTPSetup,
+		"POST /api/settings/totp/verify":  handleTOTPVerify,
+		"POST /api/settings/totp/disable": handleTOTPDisable,
+		"GET /api/settings/totp.png":      handleTOTPQR,
 		"GET /api/apps":                  handleApps,
 		"GET /api/apps/{name}":           handleAppDetail,
 		"POST /api/apps/{name}/env":      handleEnv,

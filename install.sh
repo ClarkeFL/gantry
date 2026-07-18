@@ -33,17 +33,8 @@ curl -fsSL "https://github.com/$REPO/releases/latest/download/gantry-linux-$ARCH
 chmod +x /usr/local/bin/gantry.new
 mv /usr/local/bin/gantry.new /usr/local/bin/gantry
 
-# 3. first-run setup (password + 2FA secret) — interactive, skipped if done before
+# 3. account setup happens in the browser on first visit (register → enable 2FA)
 mkdir -p /var/lib/gantry
-if [ ! -f /var/lib/gantry/auth.json ]; then
-  if [ -t 0 ]; then
-    gantry init
-  elif (exec < /dev/tty) 2>/dev/null; then
-    gantry init < /dev/tty   # curl|sh: stdin is the script, prompt on the tty instead
-  else
-    echo "!! no tty — run 'gantry init' then 'systemctl restart gantry' to finish setup"
-  fi
-fi
 
 # 4. systemd service — auto-start on boot, auto-restart (also how self-update applies)
 cat > /etc/systemd/system/gantry.service <<EOF
@@ -73,6 +64,6 @@ echo "  panel:    http://$IP:8022"
 echo "  service:  systemctl status gantry"
 echo "  logs:     journalctl -u gantry -f"
 echo ""
-echo "  log in with the password and 2FA code from"
-echo "  the 'gantry init' step above."
+echo "  NEXT: open the panel URL above, create your"
+echo "  admin account, then enable 2FA in Settings."
 echo "================================================="

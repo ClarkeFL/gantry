@@ -53,7 +53,24 @@ func handleApps(w http.ResponseWriter, r *http.Request) {
 	}
 	metaMu.Unlock()
 	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
-	writeJSON(w, map[string]any{"apps": apps, "services": listServices()})
+	catSet := map[string]bool{}
+	cats := []string{}
+	settingsMu.Lock()
+	for _, c := range settings.Categories {
+		if !catSet[c] {
+			catSet[c] = true
+			cats = append(cats, c)
+		}
+	}
+	settingsMu.Unlock()
+	for _, a := range apps {
+		if a.Category != "" && !catSet[a.Category] {
+			catSet[a.Category] = true
+			cats = append(cats, a.Category)
+		}
+	}
+	sort.Strings(cats)
+	writeJSON(w, map[string]any{"apps": apps, "services": listServices(), "categories": cats})
 }
 
 func handleAppDetail(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +117,7 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	jobs := make([]cronJob, len(m.Jobs))
 	copy(jobs, m.Jobs)
 	category := m.Category
+	repo, ref, dockerfile, image := m.Repo, m.Ref, m.Dockerfile, m.Image
 	metaMu.Unlock()
 	for i := range jobs {
 		jobs[i].Last = lastRun(name, jobs[i].ID)
@@ -114,6 +132,10 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 		"leEmailSet": func() bool { settingsMu.Lock(); defer settingsMu.Unlock(); return settings.LEEmail != "" }(),
 		"jobs":       jobs,
 		"nativeCron": nativeCron,
+		"repo":       repo,
+		"ref":        ref,
+		"dockerfile": dockerfile,
+		"image":      image,
 	})
 }
 
@@ -477,22 +499,64 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req struct{ Image string }
+	var req struct{ Image, Repo, Ref, Dockerfile string }
 	json.NewDecoder(r.Body).Decode(&req)
+	req.Repo, req.Image = strings.TrimSpace(req.Repo), strings.TrimSpace(req.Image)
 	send, ok := sseStart(w)
 	if !ok {
 		return
 	}
+	if req.Repo != "" || req.Image != "" {
+		// remember the source so the next plain Deploy redeploys the same thing
+		metaMu.Lock()
+		m := getMeta(name)
+		m.Repo, m.Ref, m.Dockerfile, m.Image = req.Repo, strings.TrimSpace(req.Ref), strings.TrimSpace(req.Dockerfile), req.Image
+		saveMeta()
+		metaMu.Unlock()
+	} else {
+		// no source given → redeploy from the stored one
+		metaMu.Lock()
+		m := getMeta(name)
+		req.Repo, req.Ref, req.Dockerfile, req.Image = m.Repo, m.Ref, m.Dockerfile, m.Image
+		metaMu.Unlock()
+	}
 	if mockMode {
-		for _, l := range []string{"-----> Rebuilding " + name, "-----> Pulling image...", "-----> Releasing...", "-----> Done"} {
+		src := "last source"
+		if req.Repo != "" {
+			src = req.Repo
+		} else if req.Image != "" {
+			src = req.Image
+		}
+		for _, l := range []string{"-----> Deploying " + name + " from " + src, "-----> Building...", "-----> Releasing...", "-----> Done"} {
 			send(l)
 			time.Sleep(400 * time.Millisecond)
 		}
+		mockMu.Lock()
+		mockRunning[name] = true
+		mockMu.Unlock()
+		send("[gantry] done")
 		return
 	}
-	if req.Image != "" {
+	switch {
+	case req.Repo != "":
+		if req.Dockerfile != "" {
+			dokku("builder-dockerfile:set", name, "dockerfile-path", req.Dockerfile)
+		}
+		url := req.Repo
+		settingsMu.Lock()
+		user, tok := settings.GitHubUser, settings.GitHubToken
+		settingsMu.Unlock()
+		if user != "" && tok != "" && strings.HasPrefix(url, "https://github.com/") {
+			url = "https://" + user + ":" + tok + "@" + strings.TrimPrefix(url, "https://")
+		}
+		args := []string{"git:sync", "--build", name, url}
+		if req.Ref != "" {
+			args = append(args, req.Ref)
+		}
+		streamCmd(r.Context(), send, "dokku", args...)
+	case req.Image != "":
 		streamCmd(r.Context(), send, "dokku", "git:from-image", name, req.Image)
-	} else {
+	default:
 		streamCmd(r.Context(), send, "dokku", "ps:rebuild", name)
 	}
 	send("[gantry] done")

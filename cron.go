@@ -26,8 +26,12 @@ type cronJob struct {
 }
 
 type appMeta struct {
-	Category string    `json:"category,omitempty"`
-	Jobs     []cronJob `json:"jobs,omitempty"`
+	Category   string    `json:"category,omitempty"`
+	Jobs       []cronJob `json:"jobs,omitempty"`
+	Repo       string    `json:"repo,omitempty"`
+	Ref        string    `json:"ref,omitempty"`
+	Dockerfile string    `json:"dockerfile,omitempty"`
+	Image      string    `json:"image,omitempty"`
 }
 
 var (

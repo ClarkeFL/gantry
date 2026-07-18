@@ -1,9 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/base32"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,9 +13,10 @@ import (
 )
 
 type panelSettings struct {
-	GitHubUser  string `json:"github_user,omitempty"`
-	GitHubToken string `json:"github_token,omitempty"`
-	LEEmail     string `json:"letsencrypt_email,omitempty"`
+	GitHubUser  string   `json:"github_user,omitempty"`
+	GitHubToken string   `json:"github_token,omitempty"`
+	LEEmail     string   `json:"letsencrypt_email,omitempty"`
+	Categories  []string `json:"categories,omitempty"`
 }
 
 var (
@@ -45,8 +43,8 @@ func githubToken() string {
 	return settings.GitHubToken
 }
 
-func otpauthURI() string {
-	return fmt.Sprintf("otpauth://totp/gantry?secret=%s&issuer=gantry", auth.TOTPSecret)
+func otpauthURI(secret string) string {
+	return fmt.Sprintf("otpauth://totp/gantry?secret=%s&issuer=gantry", secret)
 }
 
 func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
@@ -62,13 +60,99 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 	settingsMu.Lock()
 	leEmail := settings.LEEmail
 	settingsMu.Unlock()
-	writeJSON(w, map[string]any{
+	out := map[string]any{
 		"githubUser":  user,
 		"githubToken": masked,
 		"leEmail":     leEmail,
-		"totpSecret":  auth.TOTPSecret,
-		"totpURI":     otpauthURI(),
-	})
+		"email":       auth.Email,
+		"totpEnabled": auth.TOTPSecret != "",
+		"totpPending": auth.PendingTOTP != "",
+	}
+	if auth.PendingTOTP != "" {
+		out["pendingSecret"] = auth.PendingTOTP
+	}
+	writeJSON(w, out)
+}
+
+// handleTOTPSetup stages a new secret; it only becomes active once a code is verified.
+func handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
+	auth.PendingTOTP = newTOTPSecret()
+	if err := saveAuth(); err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"secret": auth.PendingTOTP, "uri": otpauthURI(auth.PendingTOTP)})
+}
+
+func handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Code string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	if auth.PendingTOTP == "" {
+		httpErr(w, 400, "no 2FA setup in progress")
+		return
+	}
+	if !codeValid(auth.PendingTOTP, strings.TrimSpace(req.Code)) {
+		httpErr(w, 401, "wrong code — try the next one from your app")
+		return
+	}
+	auth.TOTPSecret, auth.PendingTOTP = auth.PendingTOTP, ""
+	if err := saveAuth(); err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Password string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	if !verifyPassword(req.Password) {
+		httpErr(w, 401, "password is wrong")
+		return
+	}
+	auth.TOTPSecret, auth.PendingTOTP = "", ""
+	if err := saveAuth(); err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleCategoryCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Name string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		httpErr(w, 400, "category name required")
+		return
+	}
+	settingsMu.Lock()
+	found := false
+	for _, c := range settings.Categories {
+		if strings.EqualFold(c, req.Name) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		settings.Categories = append(settings.Categories, req.Name)
+	}
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 func handleLEEmail(w http.ResponseWriter, r *http.Request) {
@@ -138,10 +222,7 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "new password must be at least 8 characters")
 		return
 	}
-	salt := make([]byte, 16)
-	rand.Read(salt)
-	auth.Salt = base64.RawStdEncoding.EncodeToString(salt)
-	auth.Hash = hashPassword(req.New, salt)
+	setPassword(req.New)
 	if err := saveAuth(); err != nil {
 		httpErr(w, 500, err.Error())
 		return
@@ -149,28 +230,13 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-func handleTOTPRegen(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Password string }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpErr(w, 400, "bad request")
-		return
-	}
-	if !verifyPassword(req.Password) {
-		httpErr(w, 401, "password is wrong")
-		return
-	}
-	secret := make([]byte, 20)
-	rand.Read(secret)
-	auth.TOTPSecret = base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(secret)
-	if err := saveAuth(); err != nil {
-		httpErr(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, map[string]any{"secret": auth.TOTPSecret, "uri": otpauthURI()})
-}
-
+// handleTOTPQR shows the QR only while a setup is pending — the active secret is never re-displayed.
 func handleTOTPQR(w http.ResponseWriter, r *http.Request) {
-	png, err := qrcode.Encode(otpauthURI(), qrcode.Medium, 240)
+	if auth.PendingTOTP == "" {
+		httpErr(w, 404, "no 2FA setup in progress")
+		return
+	}
+	png, err := qrcode.Encode(otpauthURI(auth.PendingTOTP), qrcode.Medium, 240)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
