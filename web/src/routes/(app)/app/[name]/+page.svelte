@@ -24,13 +24,15 @@
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 
 	type Job = { id: string; schedule: string; command: string; last?: string };
+	type Domain = { name: string; dnsOk: boolean };
 	type Detail = {
 		name: string;
 		running: boolean;
 		category: string;
 		env: Record<string, string>;
-		domains: string[];
+		domains: Domain[];
 		ssl: boolean;
+		leEmailSet: boolean;
 		jobs: Job[];
 		nativeCron: string;
 	};
@@ -72,6 +74,8 @@
 	let sslRunning = $state(false);
 	let sslLines = $state<string[]>([]);
 	let stopSSL: (() => void) | null = null;
+	let autoSSLTried = false; // once per page visit — avoids hammering LE rate limits on failures
+	let dnsTimer: ReturnType<typeof setInterval> | undefined;
 
 	function msg(e: unknown) {
 		return e instanceof Error ? e.message : String(e);
@@ -83,6 +87,20 @@
 		origEnv = { ...d.env };
 		jobs = d.jobs.map((j) => ({ ...j }));
 		category = d.category;
+
+		const waiting = d.domains.some((x) => !x.dnsOk);
+		// poll while any domain waits on DNS; when all resolve, request the cert once
+		if (waiting && !dnsTimer) dnsTimer = setInterval(load, 30_000);
+		if (!waiting && dnsTimer) {
+			clearInterval(dnsTimer);
+			dnsTimer = undefined;
+		}
+		if (!d.ssl && d.leEmailSet && d.domains.length && !waiting && !autoSSLTried && !sslRunning) {
+			autoSSLTried = true;
+			toast.info('All domains point here — requesting certificate');
+			sslOpen = true;
+			enableSSL();
+		}
 	}
 	onMount(() => {
 		load().catch((e) => toast.error(msg(e)));
@@ -91,6 +109,7 @@
 		stopLogs?.();
 		stopDeploy?.();
 		stopSSL?.();
+		if (dnsTimer) clearInterval(dnsTimer);
 	});
 
 	$effect(() => {
@@ -319,24 +338,31 @@
 					</Card.Header>
 					<Card.Content>
 						<div class="divide-border overflow-hidden rounded-lg border divide-y">
-							{#each d.domains as domain (domain)}
+							{#each d.domains as domain (domain.name)}
 								<div class="bg-muted/30 flex items-center gap-1 px-3 py-2">
 									<span class="text-muted-foreground font-mono text-xs">{d.ssl ? 'https://' : 'http://'}</span>
-									<span class="flex-1 truncate font-mono text-xs">{domain}</span>
-									{#if d.ssl}<LockIcon class="size-3.5 text-emerald-500" />{/if}
+									<span class="flex-1 truncate font-mono text-xs">{domain.name}</span>
+									{#if d.ssl && domain.dnsOk}
+										<LockIcon class="size-3.5 text-emerald-500" />
+									{:else if !domain.dnsOk}
+										<span class="flex items-center gap-1.5 text-xs text-amber-500" title="Point this domain's DNS at the server IP — checked every 30s">
+											<span class="size-1.5 animate-pulse rounded-full bg-amber-500"></span>
+											waiting for DNS
+										</span>
+									{/if}
 									<a
-										href="{d.ssl ? 'https' : 'http'}://{domain}"
+										href="{d.ssl ? 'https' : 'http'}://{domain.name}"
 										target="_blank"
 										rel="noreferrer"
 										class="text-muted-foreground hover:text-foreground p-1.5"
-										aria-label="Open {domain}"
+										aria-label="Open {domain.name}"
 									>
 										<ExternalLinkIcon class="size-4" />
 									</a>
 									<button
 										class="text-muted-foreground hover:text-destructive p-1.5"
-										onclick={() => modDomain('remove', domain)}
-										aria-label="Remove {domain}"
+										onclick={() => modDomain('remove', domain.name)}
+										aria-label="Remove {domain.name}"
 									>
 										<Trash2Icon class="size-4" />
 									</button>

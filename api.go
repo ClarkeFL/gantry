@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -71,6 +72,29 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	domainsOut, _ := dokku("domains:report", name, "--domains-app-vhosts")
 	_, sslErr := dokku("letsencrypt:active", name)
 	nativeCron, _ := dokku("cron:list", name)
+	type domainInfo struct {
+		Name  string `json:"name"`
+		DNSOK bool   `json:"dnsOk"`
+	}
+	domains := []domainInfo{}
+	myIP := ""
+	if !mockMode {
+		myIP = serverIP()
+	}
+	for _, dom := range strings.Fields(domainsOut) {
+		ok := false
+		if mockMode {
+			ok = dom != "www.example.com" // one waiting row for UI dev
+		} else if ips, err := lookupTimeout(dom); err == nil {
+			for _, ip := range ips {
+				if ip == myIP {
+					ok = true
+					break
+				}
+			}
+		}
+		domains = append(domains, domainInfo{dom, ok})
+	}
 	metaMu.Lock()
 	m := getMeta(name)
 	jobs := make([]cronJob, len(m.Jobs))
@@ -85,8 +109,9 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 		"running":    running == "true",
 		"category":   category,
 		"env":        envVars,
-		"domains":    strings.Fields(domainsOut),
+		"domains":    domains,
 		"ssl":        sslErr == nil,
+		"leEmailSet": func() bool { settingsMu.Lock(); defer settingsMu.Unlock(); return settings.LEEmail != "" }(),
 		"jobs":       jobs,
 		"nativeCron": nativeCron,
 	})
@@ -331,6 +356,12 @@ func handleDomainsMod(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{"ok": true, "dnsOk": dnsOk})
+}
+
+func lookupTimeout(host string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return net.DefaultResolver.LookupHost(ctx, host)
 }
 
 func serverIP() string {
