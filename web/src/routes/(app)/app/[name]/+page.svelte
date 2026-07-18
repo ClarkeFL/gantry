@@ -73,7 +73,7 @@
 	let stopDeploy: (() => void) | null = null;
 
 	// source config
-	let srcType = $state<'none' | 'repo' | 'image'>('none');
+	let srcType = $state('none');
 	let srcRepo = $state('');
 	let srcRef = $state('');
 	let srcBuildDir = $state('');
@@ -389,18 +389,19 @@
 						</Card.Description>
 					</Card.Header>
 					<Card.Content class="grid max-w-xl gap-4">
-						<div class="grid gap-2">
-							<Label for="src-type">Source type</Label>
-							<select
-								id="src-type"
-								bind:value={srcType}
-								class="border-input bg-transparent dark:bg-input/30 h-9 rounded-md border px-3 text-sm shadow-xs"
-							>
-								<option value="none">None (deploy via git push / CLI)</option>
-								<option value="repo">GitHub repository</option>
-								<option value="image">Docker image</option>
-							</select>
-						</div>
+						<Tabs.Root bind:value={srcType}>
+							<Tabs.List>
+								<Tabs.Trigger value="repo">GitHub repo</Tabs.Trigger>
+								<Tabs.Trigger value="image">Docker image</Tabs.Trigger>
+								<Tabs.Trigger value="none">None</Tabs.Trigger>
+							</Tabs.List>
+						</Tabs.Root>
+						{#if srcType === 'none'}
+							<p class="text-muted-foreground text-sm">
+								No managed source — deploy via <code>git push dokku</code> or the CLI. The Deploy
+								button falls back to rebuilding the last deployed code.
+							</p>
+						{/if}
 						{#if srcType === 'repo'}
 							<div class="grid gap-2">
 								<Label for="src-repo">Repository URL</Label>
