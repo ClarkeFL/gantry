@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -98,9 +99,40 @@ var (
 	}
 )
 
+// mock state persists across panel restarts so dev behaves like real dokku
+// (which keeps SSL/running/domain state itself).
+type mockState struct {
+	Env      map[string]map[string]string `json:"env"`
+	Running  map[string]bool              `json:"running"`
+	SSL      map[string]bool              `json:"ssl"`
+	Domains  map[string][]string          `json:"domains"`
+	Services []service                    `json:"services"`
+}
+
+func mockStatePath() string { return filepath.Join(dataDir, "mockstate.json") }
+
+// saveMockState is called with mockMu held.
+func saveMockState() {
+	b, _ := json.Marshal(mockState{mockEnv, mockRunning, mockSSL, mockDomains, mockServices})
+	os.WriteFile(mockStatePath(), b, 0o644)
+}
+
+func loadMockState() {
+	b, err := os.ReadFile(mockStatePath())
+	if err != nil {
+		return
+	}
+	var s mockState
+	if json.Unmarshal(b, &s) != nil || s.Env == nil {
+		return
+	}
+	mockEnv, mockRunning, mockSSL, mockDomains, mockServices = s.Env, s.Running, s.SSL, s.Domains, s.Services
+}
+
 func mockDokku(args []string) (string, error) {
 	mockMu.Lock()
 	defer mockMu.Unlock()
+	defer saveMockState()
 	i := 0
 	for i < len(args)-1 && strings.HasPrefix(args[i], "--") {
 		i++

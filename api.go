@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -362,6 +363,7 @@ func handleAppDestroy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeCronFile(name, nil) // removes /etc/cron.d/gantry-<name>
+	os.Remove(deployLogPath(name))
 	metaMu.Lock()
 	delete(meta, name)
 	saveMeta()
@@ -433,6 +435,7 @@ func handleCreateService(w http.ResponseWriter, r *http.Request) {
 		send("-----> Creating " + req.Name + "...")
 		mockMu.Lock()
 		mockServices = append(mockServices, service{req.Type, req.Name, "running"})
+		saveMockState()
 		mockMu.Unlock()
 		send("[gantry] done")
 		return
@@ -529,6 +532,7 @@ func handleSSL(w http.ResponseWriter, r *http.Request) {
 		send("-----> Certificate retrieved and installed")
 		mockMu.Lock()
 		mockSSL[name] = true
+		saveMockState()
 		mockMu.Unlock()
 		send("[gantry] done")
 		return
@@ -606,6 +610,23 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	streamCmd(r.Context(), send, "dokku", "logs", name, "-t", "-n", "100")
 }
 
+func deployLogPath(name string) string {
+	return filepath.Join(dataDir, "deploylog", name+".log")
+}
+
+func handleDeployLog(w http.ResponseWriter, r *http.Request) {
+	name, ok := appName(w, r)
+	if !ok {
+		return
+	}
+	b, err := os.ReadFile(deployLogPath(name))
+	if err != nil {
+		b = []byte("No deploys yet.")
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write(b)
+}
+
 func handleDeploy(w http.ResponseWriter, r *http.Request) {
 	name, ok := appName(w, r)
 	if !ok {
@@ -617,6 +638,17 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 	send, ok := sseStart(w)
 	if !ok {
 		return
+	}
+	// tee every line into the per-app deploy log (fresh file per deploy)
+	os.MkdirAll(filepath.Join(dataDir, "deploylog"), 0o755)
+	if f, err := os.Create(deployLogPath(name)); err == nil {
+		defer f.Close()
+		fmt.Fprintf(f, "=== deploy started %s\n", time.Now().Format(time.RFC3339))
+		sse := send
+		send = func(line string) {
+			fmt.Fprintln(f, line)
+			sse(line)
+		}
 	}
 	if req.Repo != "" || req.Image != "" {
 		// remember the source so the next plain Deploy redeploys the same thing
@@ -650,6 +682,7 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		}
 		mockMu.Lock()
 		mockRunning[name] = true
+		saveMockState()
 		mockMu.Unlock()
 		send("[gantry] done")
 		return

@@ -68,6 +68,8 @@
 
 	// logs
 	let logLines = $state<string[]>([]);
+	let logKind = $state('runtime');
+	let deployLog = $state('');
 	let logEl = $state<HTMLElement | null>(null);
 	let stopLogs: (() => void) | null = null;
 
@@ -158,6 +160,13 @@
 	});
 	$effect(() => {
 		if (logLines.length && logEl) logEl.scrollTop = logEl.scrollHeight;
+	});
+	$effect(() => {
+		if (tab === 'logs' && logKind === 'deploy') {
+			fetch(`/api/apps/${name}/logs/deploy`)
+				.then((r) => r.text())
+				.then((t) => (deployLog = t));
+		}
 	});
 
 	async function ps(action: 'restart' | 'stop' | 'start') {
@@ -702,16 +711,28 @@
 			</Tabs.Content>
 
 			<Tabs.Content value="logs" class="mt-4">
-				<div
-					bind:this={logEl}
-					class="bg-card h-[32rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5"
-				>
-					{#each logLines as line, i (i)}
-						<div class="whitespace-pre-wrap">{line}</div>
-					{:else}
-						<p class="text-muted-foreground">Waiting for logs…</p>
-					{/each}
-				</div>
+				<Tabs.Root bind:value={logKind}>
+					<Tabs.List>
+						<Tabs.Trigger value="runtime">Runtime</Tabs.Trigger>
+						<Tabs.Trigger value="deploy">Last deploy</Tabs.Trigger>
+					</Tabs.List>
+				</Tabs.Root>
+				{#if logKind === 'runtime'}
+					<div
+						bind:this={logEl}
+						class="bg-card mt-3 h-[32rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5"
+					>
+						{#each logLines as line, i (i)}
+							<div class="whitespace-pre-wrap">{line}</div>
+						{:else}
+							<p class="text-muted-foreground">Waiting for logs…</p>
+						{/each}
+					</div>
+				{:else}
+					<div class="bg-card mt-3 h-[32rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5">
+						<pre class="whitespace-pre-wrap">{deployLog || 'Loading…'}</pre>
+					</div>
+				{/if}
 			</Tabs.Content>
 		</Tabs.Root>
 	{/if}

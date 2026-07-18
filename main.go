@@ -42,6 +42,9 @@ func main() {
 	loadMeta()
 	loadSettings()
 	loadSessions()
+	if mockMode {
+		loadMockState()
+	}
 	startStatsSampler()
 
 	mux := http.NewServeMux()
@@ -85,7 +88,8 @@ func main() {
 		"POST /api/apps/{name}/env":      handleEnv,
 		"POST /api/apps/{name}/category": handleCategory,
 		"POST /api/apps/{name}/ps":       handlePs,
-		"GET /api/apps/{name}/logs":      handleLogs,
+		"GET /api/apps/{name}/logs":        handleLogs,
+		"GET /api/apps/{name}/logs/deploy": handleDeployLog,
 		"POST /api/apps/{name}/deploy":   handleDeploy,
 		"PUT /api/apps/{name}/cron":      handleCronPut,
 	}
