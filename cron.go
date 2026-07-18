@@ -30,6 +30,7 @@ type appMeta struct {
 	Jobs       []cronJob `json:"jobs,omitempty"`
 	Repo       string    `json:"repo,omitempty"`
 	Ref        string    `json:"ref,omitempty"`
+	BuildDir   string    `json:"build_dir,omitempty"`
 	Dockerfile string    `json:"dockerfile,omitempty"`
 	Image      string    `json:"image,omitempty"`
 }

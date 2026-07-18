@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
 	"runtime"
 	"sort"
@@ -117,7 +118,7 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	jobs := make([]cronJob, len(m.Jobs))
 	copy(jobs, m.Jobs)
 	category := m.Category
-	repo, ref, dockerfile, image := m.Repo, m.Ref, m.Dockerfile, m.Image
+	repo, ref, buildDir, dockerfile, image := m.Repo, m.Ref, m.BuildDir, m.Dockerfile, m.Image
 	metaMu.Unlock()
 	for i := range jobs {
 		jobs[i].Last = lastRun(name, jobs[i].ID)
@@ -134,9 +135,52 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 		"nativeCron": nativeCron,
 		"repo":       repo,
 		"ref":        ref,
+		"buildDir":   buildDir,
 		"dockerfile": dockerfile,
 		"image":      image,
 	})
+}
+
+// handleSourceSet persists an app's deploy source and applies builder settings.
+func handleSourceSet(w http.ResponseWriter, r *http.Request) {
+	name, ok := appName(w, r)
+	if !ok {
+		return
+	}
+	var req struct{ Repo, Ref, BuildDir, Dockerfile, Image string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	for _, p := range []*string{&req.Repo, &req.Ref, &req.BuildDir, &req.Dockerfile, &req.Image} {
+		*p = strings.TrimSpace(*p)
+	}
+	if req.Repo != "" && req.Image != "" {
+		httpErr(w, 400, "choose a repo or an image, not both")
+		return
+	}
+	metaMu.Lock()
+	m := getMeta(name)
+	m.Repo, m.Ref, m.BuildDir, m.Dockerfile, m.Image = req.Repo, req.Ref, req.BuildDir, req.Dockerfile, req.Image
+	err := saveMeta()
+	metaMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	if !mockMode && req.Repo != "" {
+		if req.BuildDir != "" {
+			dokku("builder:set", name, "build-dir", req.BuildDir)
+		} else {
+			dokku("builder:set", name, "build-dir")
+		}
+		if req.Dockerfile != "" {
+			dokku("builder-dockerfile:set", name, "dockerfile-path", req.Dockerfile)
+		} else {
+			dokku("builder-dockerfile:set", name, "dockerfile-path")
+		}
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 func handleEnv(w http.ResponseWriter, r *http.Request) {
@@ -527,6 +571,11 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		} else if req.Image != "" {
 			src = req.Image
 		}
+		if req.Repo != "" || req.Image != "" {
+			send("[check] verifying source…")
+			time.Sleep(300 * time.Millisecond)
+			send("[check] source ok")
+		}
 		for _, l := range []string{"-----> Deploying " + name + " from " + src, "-----> Building...", "-----> Releasing...", "-----> Done"} {
 			send(l)
 			time.Sleep(400 * time.Millisecond)
@@ -539,9 +588,6 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case req.Repo != "":
-		if req.Dockerfile != "" {
-			dokku("builder-dockerfile:set", name, "dockerfile-path", req.Dockerfile)
-		}
 		url := req.Repo
 		settingsMu.Lock()
 		user, tok := settings.GitHubUser, settings.GitHubToken
@@ -549,12 +595,41 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		if user != "" && tok != "" && strings.HasPrefix(url, "https://github.com/") {
 			url = "https://" + user + ":" + tok + "@" + strings.TrimPrefix(url, "https://")
 		}
+		// pre-flight: repo reachable, auth ok, branch exists — before any build starts
+		send("[check] verifying repository access…")
+		checkArgs := []string{"ls-remote", "--exit-code", url}
+		if req.Ref != "" {
+			checkArgs = append(checkArgs, req.Ref)
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		out, err := exec.CommandContext(ctx, "git", checkArgs...).CombinedOutput()
+		cancel()
+		if err != nil {
+			detail := strings.TrimSpace(strings.ReplaceAll(string(out), tok, "•••"))
+			if req.Ref != "" && strings.Contains(err.Error(), "exit status 2") {
+				detail = "branch or tag '" + req.Ref + "' not found in the repository"
+			}
+			send("[error] repository check failed: " + detail)
+			send("[gantry] aborted — nothing was deployed")
+			return
+		}
+		send("[check] repository ok" + map[bool]string{true: ", branch '" + req.Ref + "' found", false: ""}[req.Ref != ""])
 		args := []string{"git:sync", "--build", name, url}
 		if req.Ref != "" {
 			args = append(args, req.Ref)
 		}
 		streamCmd(r.Context(), send, "dokku", args...)
 	case req.Image != "":
+		send("[check] verifying image exists…")
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		out, err := exec.CommandContext(ctx, "docker", "manifest", "inspect", req.Image).CombinedOutput()
+		cancel()
+		if err != nil {
+			send("[error] image check failed: " + strings.TrimSpace(string(out)))
+			send("[gantry] aborted — nothing was deployed")
+			return
+		}
+		send("[check] image found")
 		streamCmd(r.Context(), send, "dokku", "git:from-image", name, req.Image)
 	default:
 		streamCmd(r.Context(), send, "dokku", "ps:rebuild", name)

@@ -37,6 +37,7 @@
 		nativeCron: string;
 		repo: string;
 		ref: string;
+		buildDir: string;
 		dockerfile: string;
 		image: string;
 	};
@@ -69,11 +70,23 @@
 	let deployOpen = $state(false);
 	let deploying = $state(false);
 	let deployLines = $state<string[]>([]);
-	let image = $state('');
-	let deployRepo = $state('');
-	let deployRef = $state('');
-	let deployDf = $state('');
 	let stopDeploy: (() => void) | null = null;
+
+	// source config
+	let srcType = $state<'none' | 'repo' | 'image'>('none');
+	let srcRepo = $state('');
+	let srcRef = $state('');
+	let srcBuildDir = $state('');
+	let srcDf = $state('');
+	let srcImage = $state('');
+	let savingSrc = $state(false);
+	const sourceSummary = $derived(
+		srcType === 'repo' && srcRepo
+			? `${srcRepo}${srcRef ? ' @ ' + srcRef : ''}${srcBuildDir ? ' (' + srcBuildDir + ')' : ''}`
+			: srcType === 'image' && srcImage
+				? srcImage
+				: 'last deployed source (rebuild)'
+	);
 
 	// domains + ssl
 	let newDomain = $state('');
@@ -94,10 +107,12 @@
 		origEnv = { ...d.env };
 		jobs = d.jobs.map((j) => ({ ...j }));
 		category = d.category;
-		image = d.image ?? '';
-		deployRepo = d.repo ?? '';
-		deployRef = d.ref ?? '';
-		deployDf = d.dockerfile ?? '';
+		srcRepo = d.repo ?? '';
+		srcRef = d.ref ?? '';
+		srcBuildDir = d.buildDir ?? '';
+		srcDf = d.dockerfile ?? '';
+		srcImage = d.image ?? '';
+		srcType = srcRepo ? 'repo' : srcImage ? 'image' : 'none';
 
 		const waiting = d.domains.some((x) => !x.dnsOk);
 		// poll while any domain waits on DNS; when all resolve, request the cert once
@@ -148,28 +163,49 @@
 		}
 	}
 
-	function deploy() {
+	function startDeploy() {
+		if (srcType === 'none' && !d?.running) {
+			tab = 'source';
+			toast.info('Set a deploy source first');
+			return;
+		}
+		deployOpen = true;
 		deploying = true;
 		deployLines = [];
+		// empty body → the server deploys from the saved source, with pre-flight checks
 		stopDeploy = stream(
 			`/apps/${name}/deploy`,
 			(l) => {
 				deployLines.push(l);
 			},
-			{
-				method: 'POST',
-				body: JSON.stringify({
-					repo: deployRepo.trim(),
-					ref: deployRef.trim(),
-					dockerfile: deployDf.trim(),
-					image: deployRepo.trim() ? '' : image.trim()
-				})
-			},
+			{ method: 'POST', body: '{}' },
 			() => {
 				deploying = false;
 				load();
 			}
 		);
+	}
+
+	async function saveSource(andDeploy = false) {
+		savingSrc = true;
+		try {
+			await api(`/apps/${name}/source`, {
+				method: 'PUT',
+				body: JSON.stringify({
+					repo: srcType === 'repo' ? srcRepo : '',
+					ref: srcType === 'repo' ? srcRef : '',
+					buildDir: srcType === 'repo' ? srcBuildDir : '',
+					dockerfile: srcType === 'repo' ? srcDf : '',
+					image: srcType === 'image' ? srcImage : ''
+				})
+			});
+			toast.success('Source saved');
+			if (andDeploy) startDeploy();
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			savingSrc = false;
+		}
 	}
 
 	async function modDomain(action: 'add' | 'remove', domain: string) {
@@ -328,7 +364,7 @@
 						<PlayIcon class="size-4" /> Start
 					</Button>
 				{/if}
-				<Button size="sm" onclick={() => (deployOpen = true)}>
+				<Button size="sm" onclick={startDeploy}>
 					<RocketIcon class="size-4" /> Deploy
 				</Button>
 			</div>
@@ -337,10 +373,73 @@
 		<Tabs.Root bind:value={tab}>
 			<Tabs.List>
 				<Tabs.Trigger value="overview">Overview</Tabs.Trigger>
+				<Tabs.Trigger value="source">Source</Tabs.Trigger>
 				<Tabs.Trigger value="env">Environment</Tabs.Trigger>
 				<Tabs.Trigger value="cron">Cron</Tabs.Trigger>
 				<Tabs.Trigger value="logs">Logs</Tabs.Trigger>
 			</Tabs.List>
+
+			<Tabs.Content value="source" class="mt-4">
+				<Card.Root>
+					<Card.Header>
+						<Card.Title class="text-base">Deploy source</Card.Title>
+						<Card.Description>
+							Where this app deploys from. Build method is auto-detected: a Dockerfile in the repo
+							uses <code>docker build</code>, otherwise buildpacks.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="grid max-w-xl gap-4">
+						<div class="grid gap-2">
+							<Label for="src-type">Source type</Label>
+							<select
+								id="src-type"
+								bind:value={srcType}
+								class="border-input bg-transparent dark:bg-input/30 h-9 rounded-md border px-3 text-sm shadow-xs"
+							>
+								<option value="none">None (deploy via git push / CLI)</option>
+								<option value="repo">GitHub repository</option>
+								<option value="image">Docker image</option>
+							</select>
+						</div>
+						{#if srcType === 'repo'}
+							<div class="grid gap-2">
+								<Label for="src-repo">Repository URL</Label>
+								<Input id="src-repo" class="font-mono text-xs" placeholder="https://github.com/you/repo" bind:value={srcRepo} />
+							</div>
+							<div class="grid grid-cols-2 gap-3">
+								<div class="grid gap-2">
+									<Label for="src-ref">Branch</Label>
+									<Input id="src-ref" class="font-mono text-xs" placeholder="main" bind:value={srcRef} />
+								</div>
+								<div class="grid gap-2">
+									<Label for="src-bd">Build path <span class="text-muted-foreground">(monorepo)</span></Label>
+									<Input id="src-bd" class="font-mono text-xs" placeholder="apps/web" bind:value={srcBuildDir} />
+								</div>
+							</div>
+							<div class="grid gap-2">
+								<Label for="src-df">Dockerfile path <span class="text-muted-foreground">(optional, relative to build path)</span></Label>
+								<Input id="src-df" class="font-mono text-xs" placeholder="Dockerfile" bind:value={srcDf} />
+							</div>
+							<p class="text-muted-foreground text-xs">
+								Private repo? Save your GitHub username + token in Settings — deploys authenticate with it.
+							</p>
+						{:else if srcType === 'image'}
+							<div class="grid gap-2">
+								<Label for="src-img">Image</Label>
+								<Input id="src-img" class="font-mono text-xs" placeholder="ghcr.io/you/app:latest" bind:value={srcImage} />
+							</div>
+						{/if}
+						<div class="flex gap-2">
+							<Button variant="outline" onclick={() => saveSource(false)} disabled={savingSrc}>Save</Button>
+							{#if srcType !== 'none'}
+								<Button onclick={() => saveSource(true)} disabled={savingSrc}>
+									<RocketIcon class="size-4" /> Save & deploy
+								</Button>
+							{/if}
+						</div>
+					</Card.Content>
+				</Card.Root>
+			</Tabs.Content>
 
 			<Tabs.Content value="overview" class="mt-4 grid gap-4">
 				<Card.Root>
@@ -568,39 +667,11 @@
 <Dialog.Root bind:open={deployOpen}>
 	<Dialog.Content class="max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>Deploy {name}</Dialog.Title>
+			<Dialog.Title>{deploying ? 'Deploying' : 'Deployed'} {name}</Dialog.Title>
 			<Dialog.Description>
-				From a GitHub repo (built on the server) or a registry image — the last-used source is
-				prefilled, so hitting Deploy redeploys the latest.
+				Source: <code class="text-foreground">{sourceSummary}</code> — change it on the Source tab.
 			</Dialog.Description>
 		</Dialog.Header>
-		<div class="grid gap-3">
-			<div class="grid gap-1">
-				<Label for="dep-repo">GitHub repository</Label>
-				<Input id="dep-repo" class="font-mono text-xs" placeholder="https://github.com/you/repo" bind:value={deployRepo} disabled={deploying} />
-			</div>
-			{#if deployRepo.trim()}
-				<div class="grid grid-cols-2 gap-3">
-					<div class="grid gap-1">
-						<Label for="dep-ref">Branch <span class="text-muted-foreground">(optional)</span></Label>
-						<Input id="dep-ref" class="font-mono text-xs" placeholder="main" bind:value={deployRef} disabled={deploying} />
-					</div>
-					<div class="grid gap-1">
-						<Label for="dep-df">Dockerfile path <span class="text-muted-foreground">(optional)</span></Label>
-						<Input id="dep-df" class="font-mono text-xs" placeholder="Dockerfile" bind:value={deployDf} disabled={deploying} />
-					</div>
-				</div>
-			{:else}
-				<div class="grid gap-1">
-					<Label for="dep-img">…or Docker image</Label>
-					<Input id="dep-img" class="font-mono text-xs" placeholder="ghcr.io/you/app:latest" bind:value={image} disabled={deploying} />
-				</div>
-			{/if}
-			<Button onclick={deploy} disabled={deploying} class="w-fit">
-				<RocketIcon class="size-4" />
-				{deploying ? 'Deploying…' : 'Deploy'}
-			</Button>
-		</div>
 		{#if deployLines.length}
 			<div class="bg-card mt-2 h-64 overflow-y-auto rounded-md border p-3 font-mono text-xs leading-5">
 				{#each deployLines as line, i (i)}

@@ -176,7 +176,7 @@ func mockDokku(args []string) (string, error) {
 			return "true", nil
 		}
 		return "false", fmt.Errorf("not active")
-	case strings.HasPrefix(verb, "letsencrypt:"):
+	case strings.HasPrefix(verb, "letsencrypt:"), strings.HasPrefix(verb, "builder"):
 		return "-----> OK", nil
 	default:
 		return "", fmt.Errorf("mock: unhandled dokku %s %s", verb, app)
