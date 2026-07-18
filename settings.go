@@ -26,6 +26,8 @@ type panelSettings struct {
 
 	DBCategories []string          `json:"db_categories,omitempty"`
 	DBCategory   map[string]string `json:"db_category,omitempty"` // "postgres/main-db" -> category
+
+	SessionDays int `json:"session_days,omitempty"` // 0 = default 7
 }
 
 var (
@@ -69,12 +71,17 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 	settingsMu.Lock()
 	leEmail := settings.LEEmail
 	registries := append([]registryCred{}, settings.Registries...)
+	sessionDays := settings.SessionDays
 	settingsMu.Unlock()
+	if sessionDays == 0 {
+		sessionDays = 7
+	}
 	out := map[string]any{
 		"githubUser":  user,
 		"githubToken": masked,
 		"leEmail":     leEmail,
 		"registries":  registries,
+		"sessionDays": sessionDays,
 		"email":       auth.Email,
 		"totpEnabled": auth.TOTPSecret != "",
 		"totpPending": auth.PendingTOTP != "",
@@ -129,6 +136,27 @@ func handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
 	}
 	auth.TOTPSecret, auth.PendingTOTP = "", ""
 	if err := saveAuth(); err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleSessionDays(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Days int }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	if req.Days < 1 || req.Days > 90 {
+		httpErr(w, 400, "days must be between 1 and 90")
+		return
+	}
+	settingsMu.Lock()
+	settings.SessionDays = req.Days
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
 	}

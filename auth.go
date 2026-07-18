@@ -136,14 +136,44 @@ func codeValid(secret, code string) bool {
 	return ok
 }
 
-// --- sessions (in-memory; a restart logs everyone out, which is fine) ---
-
-const sessionTTL = 7 * 24 * time.Hour
+// --- sessions (persisted to disk so restarts and self-updates keep you logged in) ---
 
 var (
 	sessMu   sync.Mutex
 	sessions = map[string]time.Time{}
 )
+
+func sessionTTL() time.Duration {
+	settingsMu.Lock()
+	days := settings.SessionDays
+	settingsMu.Unlock()
+	if days < 1 || days > 90 {
+		days = 7
+	}
+	return time.Duration(days) * 24 * time.Hour
+}
+
+func sessionsPath() string { return filepath.Join(dataDir, "sessions.json") }
+
+func loadSessions() {
+	b, err := os.ReadFile(sessionsPath())
+	if err != nil {
+		return
+	}
+	sessMu.Lock()
+	defer sessMu.Unlock()
+	json.Unmarshal(b, &sessions)
+	for tok, exp := range sessions {
+		if time.Now().After(exp) {
+			delete(sessions, tok)
+		}
+	}
+}
+
+func saveSessions() { // callers hold sessMu
+	b, _ := json.Marshal(sessions)
+	os.WriteFile(sessionsPath(), b, 0o600)
+}
 
 func randToken() string {
 	b := make([]byte, 32)
@@ -154,7 +184,8 @@ func randToken() string {
 func newSession() string {
 	tok := randToken()
 	sessMu.Lock()
-	sessions[tok] = time.Now().Add(sessionTTL)
+	sessions[tok] = time.Now().Add(sessionTTL())
+	saveSessions()
 	sessMu.Unlock()
 	return tok
 }
@@ -163,7 +194,7 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name: "gantry_s", Value: newSession(), Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		MaxAge: int(sessionTTL.Seconds()),
+		MaxAge: int(sessionTTL().Seconds()),
 		Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
 	})
 }
@@ -181,6 +212,7 @@ func sessionValid(r *http.Request) bool {
 	}
 	if time.Now().After(exp) {
 		delete(sessions, c.Value)
+		saveSessions()
 		return false
 	}
 	return true
@@ -345,6 +377,7 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie("gantry_s"); err == nil {
 		sessMu.Lock()
 		delete(sessions, c.Value)
+		saveSessions()
 		sessMu.Unlock()
 	}
 	http.SetCookie(w, &http.Cookie{Name: "gantry_s", Value: "", Path: "/", MaxAge: -1})

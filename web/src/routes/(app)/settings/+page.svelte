@@ -36,6 +36,10 @@
 	let leEmail = $state('');
 	let savingLe = $state(false);
 
+	// session length
+	let sessionDays = $state(7);
+	let savingSession = $state(false);
+
 	// docker registries
 	type Registry = { server: string; user: string };
 	let registries = $state<Registry[]>([]);
@@ -58,7 +62,21 @@
 		totpPending = s.totpPending;
 		pendingSecret = s.pendingSecret ?? '';
 		registries = s.registries ?? [];
+		sessionDays = s.sessionDays ?? 7;
 	});
+
+	async function saveSessionDays(e: SubmitEvent) {
+		e.preventDefault();
+		savingSession = true;
+		try {
+			await api('/settings/session', { method: 'POST', body: JSON.stringify({ days: sessionDays }) });
+			toast.success(`Logins now last ${sessionDays} days`);
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			savingSession = false;
+		}
+	}
 
 	async function addRegistry(e: SubmitEvent) {
 		e.preventDefault();
@@ -246,6 +264,22 @@
 			{:else}
 				<Button class="w-fit" onclick={startTotpSetup} disabled={totpBusy}>Enable two-factor authentication</Button>
 			{/if}
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="text-base">Session length</Card.Title>
+			<Card.Description>
+				How long a login stays valid (1–90 days). Sessions survive panel restarts and updates.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content>
+			<form onsubmit={saveSessionDays} class="flex max-w-xs items-center gap-2">
+				<Input type="number" min={1} max={90} bind:value={sessionDays} class="w-24" required />
+				<span class="text-muted-foreground text-sm">days</span>
+				<Button type="submit" variant="outline" disabled={savingSession}>Save</Button>
+			</form>
 		</Card.Content>
 	</Card.Root>
 
