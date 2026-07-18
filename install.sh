@@ -28,7 +28,7 @@ mkdir -p /var/lib/gantry
 if [ ! -f /var/lib/gantry/auth.json ]; then
   if [ -t 0 ]; then
     gantry init
-  elif [ -c /dev/tty ]; then
+  elif (exec < /dev/tty) 2>/dev/null; then
     gantry init < /dev/tty   # curl|sh: stdin is the script, prompt on the tty instead
   else
     echo "!! no tty — run 'gantry init' then 'systemctl restart gantry' to finish setup"
