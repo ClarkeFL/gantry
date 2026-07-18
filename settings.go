@@ -1,6 +1,10 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
 )
@@ -28,6 +33,14 @@ type panelSettings struct {
 	DBCategory   map[string]string `json:"db_category,omitempty"` // "postgres/main-db" -> category
 
 	SessionDays int `json:"session_days,omitempty"` // 0 = default 7
+
+	APITokens []apiToken `json:"api_tokens,omitempty"`
+}
+
+type apiToken struct {
+	Name    string `json:"name"`
+	Hash    string `json:"hash"` // sha256 hex — the token itself is shown once and never stored
+	Created string `json:"created"`
 }
 
 var (
@@ -76,12 +89,19 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 	if sessionDays == 0 {
 		sessionDays = 7
 	}
+	settingsMu.Lock()
+	tokens := make([]map[string]string, 0, len(settings.APITokens))
+	for _, t := range settings.APITokens {
+		tokens = append(tokens, map[string]string{"name": t.Name, "created": t.Created})
+	}
+	settingsMu.Unlock()
 	out := map[string]any{
 		"githubUser":  user,
 		"githubToken": masked,
 		"leEmail":     leEmail,
 		"registries":  registries,
 		"sessionDays": sessionDays,
+		"tokens":      tokens,
 		"email":       auth.Email,
 		"totpEnabled": auth.TOTPSecret != "",
 		"totpPending": auth.PendingTOTP != "",
@@ -140,6 +160,69 @@ func handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// --- API tokens: Bearer auth for agents/scripts; full API except /api/settings ---
+
+func handleTokenCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Name string }
+	json.NewDecoder(r.Body).Decode(&req)
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		httpErr(w, 400, "token name required")
+		return
+	}
+	raw := make([]byte, 32)
+	rand.Read(raw)
+	token := "gantry_" + hex.EncodeToString(raw)
+	sum := sha256.Sum256([]byte(token))
+	settingsMu.Lock()
+	for _, t := range settings.APITokens {
+		if t.Name == req.Name {
+			settingsMu.Unlock()
+			httpErr(w, 409, "a token with that name already exists")
+			return
+		}
+	}
+	settings.APITokens = append(settings.APITokens, apiToken{
+		Name: req.Name, Hash: hex.EncodeToString(sum[:]), Created: time.Now().Format("2006-01-02"),
+	})
+	saveSettings()
+	settingsMu.Unlock()
+	writeJSON(w, map[string]string{"token": token})
+}
+
+func handleTokenDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Name string }
+	json.NewDecoder(r.Body).Decode(&req)
+	settingsMu.Lock()
+	kept := settings.APITokens[:0]
+	for _, t := range settings.APITokens {
+		if t.Name != req.Name {
+			kept = append(kept, t)
+		}
+	}
+	settings.APITokens = kept
+	saveSettings()
+	settingsMu.Unlock()
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func tokenValid(r *http.Request) bool {
+	bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		return false
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(bearer)))
+	h := hex.EncodeToString(sum[:])
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	for _, t := range settings.APITokens {
+		if subtle.ConstantTimeCompare([]byte(t.Hash), []byte(h)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 func handleSessionDays(w http.ResponseWriter, r *http.Request) {

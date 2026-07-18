@@ -75,6 +75,8 @@ func main() {
 		"POST /api/settings/letsencrypt":  handleLEEmail,
 		"POST /api/settings/registry":     handleRegistryAdd,
 		"POST /api/settings/session":      handleSessionDays,
+		"POST /api/settings/tokens":       handleTokenCreate,
+		"DELETE /api/settings/tokens":     handleTokenDelete,
 		"POST /api/apps/{name}/domains":   handleDomainsMod,
 		"PUT /api/apps/{name}/source":     handleSourceSet,
 		"POST /api/apps/{name}/ssl":       handleSSL,

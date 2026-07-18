@@ -221,8 +221,12 @@ func sessionValid(r *http.Request) bool {
 func requireAuth(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !sessionValid(r) {
-			httpErr(w, http.StatusUnauthorized, "unauthorized")
-			return
+			// API tokens get everything except the settings/auth surface —
+			// an agent can deploy but never change the password, 2FA or tokens.
+			if strings.HasPrefix(r.URL.Path, "/api/settings") || !tokenValid(r) {
+				httpErr(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
 		}
 		h(w, r)
 	})

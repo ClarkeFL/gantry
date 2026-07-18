@@ -40,6 +40,47 @@
 	let sessionDays = $state(7);
 	let savingSession = $state(false);
 
+	// API tokens
+	let tokens = $state<{ name: string; created: string }[]>([]);
+	let newTokenName = $state('');
+	let freshToken = $state('');
+	let creatingToken = $state(false);
+
+	async function createToken(e: SubmitEvent) {
+		e.preventDefault();
+		creatingToken = true;
+		try {
+			const res = await api('/settings/tokens', {
+				method: 'POST',
+				body: JSON.stringify({ name: newTokenName.trim() })
+			});
+			freshToken = res.token;
+			newTokenName = '';
+			const s = await api('/settings');
+			tokens = s.tokens ?? [];
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			creatingToken = false;
+		}
+	}
+
+	async function revokeToken(name: string) {
+		if (!(await askConfirm(`Revoke token "${name}"? Anything using it loses access immediately.`))) return;
+		try {
+			await api('/settings/tokens', { method: 'DELETE', body: JSON.stringify({ name }) });
+			tokens = tokens.filter((t) => t.name !== name);
+			toast.success(`Revoked "${name}"`);
+		} catch (e) {
+			toast.error(msg(e));
+		}
+	}
+
+	function copyToken() {
+		navigator.clipboard.writeText(freshToken);
+		toast.success('Token copied');
+	}
+
 
 	function msg(e: unknown) {
 		return e instanceof Error ? e.message : String(e);
@@ -55,6 +96,7 @@
 		totpPending = s.totpPending;
 		pendingSecret = s.pendingSecret ?? '';
 		sessionDays = s.sessionDays ?? 7;
+		tokens = s.tokens ?? [];
 	});
 
 	async function saveSessionDays(e: SubmitEvent) {
@@ -293,6 +335,48 @@
 			<form onsubmit={saveLeEmail} class="flex max-w-sm gap-2">
 				<Input type="email" bind:value={leEmail} required placeholder="you@example.com" />
 				<Button type="submit" variant="outline" disabled={savingLe}>Save</Button>
+			</form>
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="text-base">API tokens</Card.Title>
+			<Card.Description>
+				Give AI agents and scripts access to the panel API — create apps and databases, deploy,
+				read logs, manage domains. Tokens can't change settings, your password or 2FA.
+				Use as <code>Authorization: Bearer &lt;token&gt;</code>.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content class="grid gap-4">
+			{#if freshToken}
+				<div class="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+					<p class="mb-2 text-xs font-medium text-amber-500">
+						Copy this token now — it won't be shown again.
+					</p>
+					<div class="flex items-center gap-2">
+						<code class="bg-muted flex-1 rounded px-2 py-1.5 font-mono text-xs break-all">{freshToken}</code>
+						<Button size="sm" variant="outline" onclick={copyToken}>Copy</Button>
+						<Button size="sm" variant="ghost" onclick={() => (freshToken = '')}>Done</Button>
+					</div>
+				</div>
+			{/if}
+			{#if tokens.length}
+				<div class="grid gap-2">
+					{#each tokens as t (t.name)}
+						<div class="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
+							<span class="font-medium">{t.name}</span>
+							<span class="text-muted-foreground text-xs">created {t.created}</span>
+							<Button size="sm" variant="ghost" class="text-destructive ml-auto" onclick={() => revokeToken(t.name)}>
+								Revoke
+							</Button>
+						</div>
+					{/each}
+				</div>
+			{/if}
+			<form onsubmit={createToken} class="flex max-w-sm gap-2">
+				<Input bind:value={newTokenName} required placeholder="e.g. claude-agent" />
+				<Button type="submit" variant="outline" disabled={creatingToken}>Create token</Button>
 			</form>
 		</Card.Content>
 	</Card.Root>
