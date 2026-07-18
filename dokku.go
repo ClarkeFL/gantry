@@ -68,8 +68,8 @@ func listServices() []service {
 		}
 		for i, line := range strings.Split(txt, "\n") {
 			f := strings.Fields(line)
-			if i == 0 || len(f) == 0 || strings.HasPrefix(f[0], "=") {
-				continue // header
+			if i == 0 || len(f) == 0 || strings.HasPrefix(f[0], "=") || strings.HasPrefix(f[0], "!") {
+				continue // header or "! There are no ... services"
 			}
 			s := service{Type: plugin, Name: f[0], Status: "?"}
 			if len(f) >= 3 {

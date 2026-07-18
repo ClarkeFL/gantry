@@ -47,8 +47,8 @@ func handleApps(w http.ResponseWriter, r *http.Request) {
 	metaMu.Lock()
 	for _, name := range strings.Split(out, "\n") {
 		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
+		if !appRe.MatchString(name) {
+			continue // headers and "! You haven't deployed any applications yet"
 		}
 		running, _ := dokku("ps:report", name, "--running")
 		apps = append(apps, appInfo{name, running == "true", getMeta(name).Category})
@@ -555,7 +555,7 @@ func handleDomains(w http.ResponseWriter, r *http.Request) {
 	rows := []row{}
 	for _, name := range strings.Split(out, "\n") {
 		name = strings.TrimSpace(name)
-		if name == "" {
+		if !appRe.MatchString(name) {
 			continue
 		}
 		d, _ := dokku("domains:report", name, "--domains-app-vhosts")
