@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { api, stream } from '$lib/api';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button';
@@ -60,6 +61,10 @@
 	// category
 	let category = $state('');
 	let savingCategory = $state(false);
+
+	// destroy
+	let destroyConfirm = $state('');
+	let destroying = $state(false);
 
 	// logs
 	let logLines = $state<string[]>([]);
@@ -346,6 +351,18 @@
 		}
 	}
 
+	async function destroyApp() {
+		destroying = true;
+		try {
+			await api(`/apps/${name}`, { method: 'DELETE' });
+			toast.success(`Destroyed ${name}`);
+			goto('/apps');
+		} catch (e) {
+			toast.error(msg(e));
+			destroying = false;
+		}
+	}
+
 	function lastBadge(last?: string): { label: string; ok: boolean } | null {
 		if (!last) return null;
 		const [ts] = last.split(' ');
@@ -562,6 +579,28 @@
 						</Card.Content>
 					</Card.Root>
 				{/if}
+
+				<Card.Root class="border-destructive/40">
+					<Card.Header>
+						<Card.Title class="text-destructive text-base">Danger zone</Card.Title>
+						<Card.Description>
+							Destroys the app, its containers, config and domains. This cannot be undone —
+							type <code class="text-foreground">{d.name}</code> to confirm.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="flex max-w-md gap-2">
+						<Input bind:value={destroyConfirm} placeholder={d.name} class="font-mono text-xs" />
+						<Button
+							variant="destructive"
+							class="shrink-0"
+							disabled={destroyConfirm !== d.name || destroying}
+							onclick={destroyApp}
+						>
+							<Trash2Icon class="size-4" />
+							{destroying ? 'Destroying…' : 'Destroy app'}
+						</Button>
+					</Card.Content>
+				</Card.Root>
 			</Tabs.Content>
 
 			<Tabs.Content value="env" class="mt-4">

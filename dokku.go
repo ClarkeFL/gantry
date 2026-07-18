@@ -101,11 +101,11 @@ var (
 func mockDokku(args []string) (string, error) {
 	mockMu.Lock()
 	defer mockMu.Unlock()
-	cmd := args[0]
-	if cmd == "--quiet" {
-		cmd = args[1]
+	i := 0
+	for i < len(args)-1 && strings.HasPrefix(args[i], "--") {
+		i++
 	}
-	verb, app := cmd, ""
+	verb, app := args[i], ""
 	if len(args) > 1 {
 		app = args[len(args)-1]
 	}
@@ -141,6 +141,21 @@ func mockDokku(args []string) (string, error) {
 			}
 		}
 		return "-----> OK", nil
+	case verb == "apps:destroy":
+		delete(mockEnv, app)
+		delete(mockRunning, app)
+		delete(mockDomains, app)
+		delete(mockSSL, app)
+		return "-----> Destroyed " + app, nil
+	case strings.HasSuffix(verb, ":destroy"):
+		kept := mockServices[:0]
+		for _, s := range mockServices {
+			if s.Name != app {
+				kept = append(kept, s)
+			}
+		}
+		mockServices = kept
+		return "-----> Destroyed " + app, nil
 	case verb == "apps:create":
 		if mockEnv[args[1]] != nil {
 			return "", fmt.Errorf("app %s already exists", args[1])

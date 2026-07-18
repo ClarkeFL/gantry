@@ -17,7 +17,8 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
-	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
+	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 
 	type App = { name: string; running: boolean; category: string };
 
@@ -48,13 +49,13 @@
 		const g: Record<string, App[]> = {};
 		for (const c of categories) g[c] ??= [];
 		for (const a of apps) (g[a.category || 'Uncategorised'] ??= []).push(a);
-		const ordered: [string, App[]][] = categories.map((c) => [c, g[c] ?? []]);
-		if (g['Uncategorised']?.length) ordered.push(['Uncategorised', g['Uncategorised']]);
-		return ordered;
+		return categories
+			.filter((c) => c !== 'Uncategorised' || g[c]?.length)
+			.map((c) => [c, g[c] ?? []] as [string, App[]]);
 	});
 
 	async function moveCategory(from: number, to: number) {
-		if (from === to || from < 0 || to < 0) return;
+		if (from === to || from < 0 || to < 0 || to >= categories.length) return;
 		const next = [...categories];
 		const [c] = next.splice(from, 1);
 		next.splice(to, 0, c);
@@ -64,12 +65,18 @@
 		);
 	}
 
+	function nudge(category: string, dir: number) {
+		const i = categories.indexOf(category);
+		moveCategory(i, i + dir);
+	}
+
 	async function load() {
 		loading = true;
 		try {
 			const d = await api('/apps');
 			apps = d.apps ?? [];
-			categories = d.categories ?? [];
+			const cats: string[] = d.categories ?? [];
+			categories = cats.includes('Uncategorised') ? cats : ['Uncategorised', ...cats];
 		} finally {
 			loading = false;
 		}
@@ -176,23 +183,36 @@
 			<div
 				class="mt-8 mb-3 flex items-center gap-3 border-b pb-2 first:mt-0"
 				role="listitem"
-				draggable={category !== 'Uncategorised'}
+				draggable={true}
 				ondragstart={(e) => {
 					dragIdx = categories.indexOf(category);
 					e.dataTransfer?.setData('text/plain', category);
 				}}
-				ondragover={(e) => {
-					if (category !== 'Uncategorised') e.preventDefault();
-				}}
+				ondragover={(e) => e.preventDefault()}
 				ondrop={(e) => {
 					e.preventDefault();
 					moveCategory(dragIdx, categories.indexOf(category));
 					dragIdx = -1;
 				}}
 			>
-				{#if category !== 'Uncategorised'}
-					<GripVerticalIcon class="text-muted-foreground size-4 cursor-grab" />
-				{/if}
+				<span class="flex flex-col">
+					<button
+						class="text-muted-foreground hover:text-foreground disabled:opacity-30"
+						onclick={() => nudge(category, -1)}
+						disabled={categories.indexOf(category) === 0}
+						aria-label="Move {category} up"
+					>
+						<ChevronUpIcon class="size-3.5" />
+					</button>
+					<button
+						class="text-muted-foreground hover:text-foreground disabled:opacity-30"
+						onclick={() => nudge(category, 1)}
+						disabled={categories.indexOf(category) === categories.length - 1}
+						aria-label="Move {category} down"
+					>
+						<ChevronDownIcon class="size-3.5" />
+					</button>
+				</span>
 				<h2 class="text-lg font-semibold tracking-tight">{category}</h2>
 				<button
 					class="text-muted-foreground hover:text-foreground"

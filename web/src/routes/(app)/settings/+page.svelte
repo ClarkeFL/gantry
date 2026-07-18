@@ -40,13 +40,6 @@
 	let sessionDays = $state(7);
 	let savingSession = $state(false);
 
-	// docker registries
-	type Registry = { server: string; user: string };
-	let registries = $state<Registry[]>([]);
-	let regServer = $state('');
-	let regUser = $state('');
-	let regPassword = $state('');
-	let savingReg = $state(false);
 
 	function msg(e: unknown) {
 		return e instanceof Error ? e.message : String(e);
@@ -61,7 +54,6 @@
 		totpEnabled = s.totpEnabled;
 		totpPending = s.totpPending;
 		pendingSecret = s.pendingSecret ?? '';
-		registries = s.registries ?? [];
 		sessionDays = s.sessionDays ?? 7;
 	});
 
@@ -75,24 +67,6 @@
 			toast.error(msg(e));
 		} finally {
 			savingSession = false;
-		}
-	}
-
-	async function addRegistry(e: SubmitEvent) {
-		e.preventDefault();
-		savingReg = true;
-		try {
-			const res = await api('/settings/registry', {
-				method: 'POST',
-				body: JSON.stringify({ server: regServer.trim(), user: regUser.trim(), password: regPassword })
-			});
-			registries = res.registries;
-			regPassword = '';
-			toast.success('Registry login succeeded');
-		} catch (e) {
-			toast.error(msg(e));
-		} finally {
-			savingReg = false;
 		}
 	}
 
@@ -319,44 +293,6 @@
 			<form onsubmit={saveLeEmail} class="flex max-w-sm gap-2">
 				<Input type="email" bind:value={leEmail} required placeholder="you@example.com" />
 				<Button type="submit" variant="outline" disabled={savingLe}>Save</Button>
-			</form>
-		</Card.Content>
-	</Card.Root>
-
-	<Card.Root>
-		<Card.Header>
-			<Card.Title class="text-base">Docker registries</Card.Title>
-			<Card.Description>
-				Log the server in to pull private images (Docker Hub, GitLab, …). Passwords go straight to
-				<code>docker login</code> and are not stored by the panel. ghcr.io is covered by the GitHub card below.
-			</Card.Description>
-		</Card.Header>
-		<Card.Content class="grid gap-4">
-			{#if registries.length}
-				<div class="flex flex-wrap gap-2">
-					{#each registries as reg (reg.server)}
-						<code class="bg-muted rounded px-2 py-1 text-xs">{reg.user} @ {reg.server}</code>
-					{/each}
-				</div>
-			{/if}
-			<form onsubmit={addRegistry} class="grid max-w-sm gap-3">
-				<div class="grid gap-1">
-					<Label for="reg-server">Registry</Label>
-					<Input id="reg-server" bind:value={regServer} placeholder="docker.io (default)" class="font-mono text-xs" />
-				</div>
-				<div class="grid grid-cols-2 gap-3">
-					<div class="grid gap-1">
-						<Label for="reg-user">Username</Label>
-						<Input id="reg-user" bind:value={regUser} required />
-					</div>
-					<div class="grid gap-1">
-						<Label for="reg-pass">Password / token</Label>
-						<Input id="reg-pass" type="password" bind:value={regPassword} required />
-					</div>
-				</div>
-				<Button type="submit" class="w-fit" disabled={savingReg}>
-					{savingReg ? 'Logging in…' : 'Log in to registry'}
-				</Button>
 			</form>
 		</Card.Content>
 	</Card.Root>

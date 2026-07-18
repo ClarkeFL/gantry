@@ -62,6 +62,8 @@ func main() {
 		"PUT /api/categories/order":       handleCategoryOrder,
 		"PUT /api/dbcategories/order":     handleDBCategoryOrder,
 		"GET /api/services":               handleServicesGet,
+		"DELETE /api/apps/{name}":         handleAppDestroy,
+		"DELETE /api/services":            handleServiceDestroy,
 		"POST /api/services/category":     handleServiceCategorySet,
 		"POST /api/dbcategories":          handleDBCategoryCreate,
 		"DELETE /api/dbcategories":        handleDBCategoryDelete,

@@ -352,6 +352,44 @@ func handleServicesGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"services": out, "categories": cats})
 }
 
+func handleAppDestroy(w http.ResponseWriter, r *http.Request) {
+	name, ok := appName(w, r)
+	if !ok {
+		return
+	}
+	if out, err := dokku("--force", "apps:destroy", name); err != nil {
+		httpErr(w, 500, out)
+		return
+	}
+	writeCronFile(name, nil) // removes /etc/cron.d/gantry-<name>
+	metaMu.Lock()
+	delete(meta, name)
+	saveMeta()
+	metaMu.Unlock()
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleServiceDestroy(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Type, Name string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	if !serviceTypes[req.Type] || !appRe.MatchString(req.Name) {
+		httpErr(w, 400, "bad service type or name")
+		return
+	}
+	if out, err := dokku("--force", req.Type+":destroy", req.Name); err != nil {
+		httpErr(w, 500, out)
+		return
+	}
+	settingsMu.Lock()
+	delete(settings.DBCategory, req.Type+"/"+req.Name)
+	saveSettings()
+	settingsMu.Unlock()
+	writeJSON(w, map[string]any{"ok": true})
+}
+
 func handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Name, Category string }
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

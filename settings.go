@@ -303,7 +303,7 @@ func readNames(r *http.Request) ([]string, bool) {
 	seen := map[string]bool{}
 	for _, n := range req.Names {
 		n = strings.TrimSpace(n)
-		if n != "" && !strings.EqualFold(n, "Uncategorised") && !seen[strings.ToLower(n)] {
+		if n != "" && !seen[strings.ToLower(n)] { // 'Uncategorised' allowed: its position is orderable
 			seen[strings.ToLower(n)] = true
 			out = append(out, n)
 		}
