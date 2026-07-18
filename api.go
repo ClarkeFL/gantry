@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -313,7 +314,32 @@ func handleDomainsMod(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, out)
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true})
+	// If the new domain already resolves to this server, the UI can kick off
+	// Let's Encrypt immediately instead of making the user click.
+	dnsOk := false
+	if req.Action == "add" {
+		if mockMode {
+			dnsOk = true
+		} else if ips, err := net.LookupHost(req.Domain); err == nil {
+			my := serverIP()
+			for _, ip := range ips {
+				if ip == my {
+					dnsOk = true
+					break
+				}
+			}
+		}
+	}
+	writeJSON(w, map[string]any{"ok": true, "dnsOk": dnsOk})
+}
+
+func serverIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	return conn.LocalAddr().(*net.UDPAddr).IP.String()
 }
 
 // handleSSL streams `dokku letsencrypt:enable <app>` and registers the renewal cron.

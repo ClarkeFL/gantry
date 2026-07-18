@@ -136,10 +136,21 @@
 
 	async function modDomain(action: 'add' | 'remove', domain: string) {
 		try {
-			await api(`/apps/${name}/domains`, { method: 'POST', body: JSON.stringify({ action, domain }) });
-			toast.success(`${action === 'add' ? 'Added' : 'Removed'} ${domain}`);
+			const res = await api(`/apps/${name}/domains`, {
+				method: 'POST',
+				body: JSON.stringify({ action, domain })
+			});
 			newDomain = '';
 			await load();
+			if (action === 'remove') {
+				toast.success(`Removed ${domain}`);
+			} else if (res.dnsOk) {
+				toast.success(`Added ${domain} — requesting certificate`);
+				sslOpen = true;
+				enableSSL();
+			} else {
+				toast.info(`Added ${domain}. Its DNS doesn't point at this server yet — HTTPS will be one click away once it does.`, { duration: 8000 });
+			}
 		} catch (e) {
 			toast.error(msg(e));
 		}
