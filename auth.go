@@ -45,6 +45,16 @@ func hashPassword(pw string, salt []byte) string {
 	return base64.RawStdEncoding.EncodeToString(argon2.IDKey([]byte(pw), salt, 1, 64*1024, 4, 32))
 }
 
+func verifyPassword(pw string) bool {
+	salt, _ := base64.RawStdEncoding.DecodeString(auth.Salt)
+	return subtle.ConstantTimeCompare([]byte(hashPassword(pw, salt)), []byte(auth.Hash)) == 1
+}
+
+func saveAuth() error {
+	b, _ := json.MarshalIndent(auth, "", "  ")
+	return os.WriteFile(authPath(), b, 0o600)
+}
+
 func initAuth() {
 	fmt.Print("New admin password (min 8 chars): ")
 	var pw string
@@ -206,9 +216,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	salt, _ := base64.RawStdEncoding.DecodeString(auth.Salt)
-	pwOK := subtle.ConstantTimeCompare([]byte(hashPassword(req.Password, salt)), []byte(auth.Hash)) == 1
-	if !pwOK || !totpValid(req.Code) {
+	if !verifyPassword(req.Password) || !totpValid(req.Code) {
 		httpErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}

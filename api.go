@@ -228,6 +228,82 @@ func handleCronPut(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"jobs": req.Jobs})
 }
 
+func handleCreateApp(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Name, Category string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	if !appRe.MatchString(req.Name) {
+		httpErr(w, 400, "app names must be lowercase letters, digits, . or -")
+		return
+	}
+	if out, err := dokku("apps:create", req.Name); err != nil {
+		httpErr(w, 500, out)
+		return
+	}
+	if c := strings.TrimSpace(req.Category); c != "" {
+		metaMu.Lock()
+		getMeta(req.Name).Category = c
+		saveMeta()
+		metaMu.Unlock()
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+var serviceTypes = map[string]bool{"postgres": true, "mysql": true, "mariadb": true, "redis": true, "mongo": true}
+
+func handleCreateService(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Type, Name string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	if !serviceTypes[req.Type] || !appRe.MatchString(req.Name) {
+		httpErr(w, 400, "bad service type or name")
+		return
+	}
+	send, ok := sseStart(w)
+	if !ok {
+		return
+	}
+	if mockMode {
+		send("-----> Creating " + req.Name + "...")
+		mockMu.Lock()
+		mockServices = append(mockServices, service{req.Type, req.Name, "running"})
+		mockMu.Unlock()
+		send("[gantry] done")
+		return
+	}
+	// first create on a plugin pulls its image — stream so the UI shows progress
+	streamCmd(r.Context(), send, "dokku", req.Type+":create", req.Name)
+	send("[gantry] done")
+}
+
+func handleDomains(w http.ResponseWriter, r *http.Request) {
+	out, err := dokku("--quiet", "apps:list")
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	type row struct {
+		Domain string `json:"domain"`
+		App    string `json:"app"`
+	}
+	rows := []row{}
+	for _, name := range strings.Split(out, "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		d, _ := dokku("domains:report", name, "--domains-app-vhosts")
+		for _, dom := range strings.Fields(d) {
+			rows = append(rows, row{dom, name})
+		}
+	}
+	writeJSON(w, map[string]any{"domains": rows})
+}
+
 // --- streaming (SSE over plain fetch) ---
 
 func sseStart(w http.ResponseWriter) (func(string), bool) {
@@ -317,7 +393,11 @@ func latestVersion() string {
 		return updateCache.latest
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get("https://api.github.com/repos/" + repo + "/releases/latest")
+	greq, _ := http.NewRequest("GET", "https://api.github.com/repos/"+repo+"/releases/latest", nil)
+	if tok := githubToken(); tok != "" {
+		greq.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := client.Do(greq)
 	if err != nil {
 		return updateCache.latest
 	}

@@ -1,98 +1,107 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { api } from '$lib/api';
-	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Card from '$lib/components/ui/card';
-	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-	import BoxIcon from '@lucide/svelte/icons/box';
-	import DatabaseIcon from '@lucide/svelte/icons/database';
+	import * as Table from '$lib/components/ui/table';
+	import CpuIcon from '@lucide/svelte/icons/cpu';
+	import MemoryStickIcon from '@lucide/svelte/icons/memory-stick';
+	import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
+	import ActivityIcon from '@lucide/svelte/icons/activity';
 
-	type App = { name: string; running: boolean; category: string };
-	type Service = { type: string; name: string; status: string };
+	type Stats = {
+		cpu: number;
+		mem: { used: number; total: number };
+		disk: { used: number; total: number };
+		net: { rx: number; tx: number };
+		apps: { app: string; cpu: string; mem: string }[];
+	};
 
-	let apps = $state<App[]>([]);
-	let services = $state<Service[]>([]);
-	let loading = $state(true);
+	let s = $state<Stats | null>(null);
+	let timer: ReturnType<typeof setInterval>;
 
-	const groups = $derived.by(() => {
-		const g: Record<string, App[]> = {};
-		for (const a of apps) (g[a.category || 'Uncategorised'] ??= []).push(a);
-		return Object.entries(g).sort(([a], [b]) => a.localeCompare(b));
-	});
+	const gb = (n: number) => (n / 1073741824).toFixed(1) + ' GB';
+	const rate = (n: number) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB/s' : (n / 1024).toFixed(0) + ' KB/s');
+	const pct = (used: number, total: number) => (total ? (100 * used) / total : 0);
 
 	async function load() {
-		loading = true;
 		try {
-			const d = await api('/apps');
-			apps = d.apps ?? [];
-			services = d.services ?? [];
-		} finally {
-			loading = false;
+			s = await api('/stats');
+		} catch {
+			// transient — next poll retries
 		}
 	}
-	onMount(load);
+	onMount(() => {
+		load();
+		timer = setInterval(load, 4000);
+	});
+	onDestroy(() => clearInterval(timer));
 </script>
 
-<div class="mx-auto max-w-5xl">
-	<div class="mb-6 flex items-center justify-between">
-		<h1 class="text-2xl font-semibold tracking-tight">Apps</h1>
-		<Button variant="outline" size="sm" onclick={load} disabled={loading}>
-			<RefreshCwIcon class="size-4 {loading ? 'animate-spin' : ''}" /> Refresh
-		</Button>
-	</div>
+{#snippet meter(label: string, value: string, percent: number, Icon: any)}
+	<Card.Root>
+		<Card.Header>
+			<Card.Description class="flex items-center gap-2"><Icon class="size-4" /> {label}</Card.Description>
+			<Card.Title class="text-xl tabular-nums">{value}</Card.Title>
+		</Card.Header>
+		<Card.Content>
+			<div class="bg-secondary h-1.5 w-full overflow-hidden rounded-full">
+				<div
+					class="h-full rounded-full {percent > 85 ? 'bg-red-500' : 'bg-primary'}"
+					style="width: {Math.min(100, percent)}%"
+				></div>
+			</div>
+		</Card.Content>
+	</Card.Root>
+{/snippet}
 
-	{#if loading && !apps.length}
-		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-			{#each Array(3) as _, i (i)}<Skeleton class="h-28" />{/each}
+<div class="mx-auto max-w-5xl">
+	<h1 class="mb-6 text-2xl font-semibold tracking-tight">Overview</h1>
+
+	{#if !s}
+		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+			{#each Array(4) as _, i (i)}<Skeleton class="h-32" />{/each}
 		</div>
 	{:else}
-		{#each groups as [category, list] (category)}
-			<h2 class="text-muted-foreground mt-6 mb-2 text-xs font-medium tracking-widest uppercase first:mt-0">
-				{category}
-			</h2>
-			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-				{#each list as app (app.name)}
-					<a href="/app/{app.name}" class="group">
-						<Card.Root class="group-hover:border-primary/50 h-full transition-colors">
-							<Card.Header>
-								<Card.Title class="flex items-center gap-2 text-base">
-									<BoxIcon class="text-muted-foreground size-4" />
-									{app.name}
-									<span
-										class="ml-auto size-2 rounded-full {app.running ? 'bg-emerald-500' : 'bg-red-500'}"
-										title={app.running ? 'running' : 'stopped'}
-									></span>
-								</Card.Title>
-								<Card.Description>{app.running ? 'Running' : 'Stopped'}</Card.Description>
-							</Card.Header>
-						</Card.Root>
-					</a>
-				{/each}
-			</div>
-		{/each}
+		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+			{@render meter('CPU', s.cpu.toFixed(0) + '%', s.cpu, CpuIcon)}
+			{@render meter('Memory', gb(s.mem.used) + ' / ' + gb(s.mem.total), pct(s.mem.used, s.mem.total), MemoryStickIcon)}
+			{@render meter('Disk', gb(s.disk.used) + ' / ' + gb(s.disk.total), pct(s.disk.used, s.disk.total), HardDriveIcon)}
+			<Card.Root>
+				<Card.Header>
+					<Card.Description class="flex items-center gap-2"><ActivityIcon class="size-4" /> Network</Card.Description>
+					<Card.Title class="text-xl tabular-nums">↓ {rate(s.net.rx)}</Card.Title>
+				</Card.Header>
+				<Card.Content>
+					<p class="text-muted-foreground text-sm tabular-nums">↑ {rate(s.net.tx)}</p>
+				</Card.Content>
+			</Card.Root>
+		</div>
 
-		<h2 class="text-muted-foreground mt-10 mb-2 text-xs font-medium tracking-widest uppercase">Databases</h2>
-		{#if services.length}
-			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-				{#each services as s (s.type + s.name)}
-					<Card.Root>
-						<Card.Header>
-							<Card.Title class="flex items-center gap-2 text-base">
-								<DatabaseIcon class="text-muted-foreground size-4" />
-								{s.name}
-								<Badge variant="secondary" class="ml-auto">{s.type}</Badge>
-							</Card.Title>
-							<Card.Description>{s.status}</Card.Description>
-						</Card.Header>
-					</Card.Root>
-				{/each}
+		<h2 class="text-muted-foreground mt-10 mb-2 text-xs font-medium tracking-widest uppercase">Per-app usage</h2>
+		{#if s.apps.length}
+			<div class="rounded-lg border">
+				<Table.Root>
+					<Table.Header>
+						<Table.Row>
+							<Table.Head>App</Table.Head>
+							<Table.Head>CPU</Table.Head>
+							<Table.Head>Memory</Table.Head>
+						</Table.Row>
+					</Table.Header>
+					<Table.Body>
+						{#each s.apps as a (a.app)}
+							<Table.Row>
+								<Table.Cell><a class="hover:underline" href="/app/{a.app}">{a.app}</a></Table.Cell>
+								<Table.Cell class="font-mono text-xs tabular-nums">{a.cpu}</Table.Cell>
+								<Table.Cell class="font-mono text-xs tabular-nums">{a.mem}</Table.Cell>
+							</Table.Row>
+						{/each}
+					</Table.Body>
+				</Table.Root>
 			</div>
 		{:else}
-			<p class="text-muted-foreground text-sm">
-				No database services found. Install a dokku plugin (postgres, mysql, redis…) and create one.
-			</p>
+			<p class="text-muted-foreground text-sm">No running containers.</p>
 		{/if}
 	{/if}
 </div>

@@ -51,9 +51,13 @@ type service struct {
 	Status string `json:"status"`
 }
 
+var mockServices = []service{{"postgres", "main-db", "running"}, {"redis", "cache", "running"}}
+
 func listServices() []service {
 	if mockMode {
-		return []service{{"postgres", "main-db", "running"}, {"redis", "cache", "running"}}
+		mockMu.Lock()
+		defer mockMu.Unlock()
+		return append([]service{}, mockServices...)
 	}
 	out := []service{}
 	for _, plugin := range []string{"postgres", "mysql", "mariadb", "redis", "mongo"} {
@@ -136,6 +140,15 @@ func mockDokku(args []string) (string, error) {
 			}
 		}
 		return "-----> OK", nil
+	case verb == "apps:create":
+		if mockEnv[args[1]] != nil {
+			return "", fmt.Errorf("app %s already exists", args[1])
+		}
+		mockEnv[args[1]] = map[string]string{}
+		mockRunning[args[1]] = false
+		return "-----> Creating " + args[1] + "...", nil
+	case verb == "registry:login":
+		return "Login Succeeded", nil
 	case verb == "ps:report":
 		return fmt.Sprint(mockRunning[args[1]]), nil
 	case strings.HasPrefix(verb, "ps:"):

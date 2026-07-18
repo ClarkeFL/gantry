@@ -5,9 +5,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { toast } from 'svelte-sonner';
 	import AnchorIcon from '@lucide/svelte/icons/anchor';
+	import GaugeIcon from '@lucide/svelte/icons/gauge';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
+	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import ArchiveIcon from '@lucide/svelte/icons/archive';
+	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import CheckIcon from '@lucide/svelte/icons/check';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 
 	let { children } = $props();
@@ -19,8 +23,11 @@
 	let updateAvailable = $state(false);
 
 	const nav = [
-		{ href: '/', label: 'Apps', icon: LayoutGridIcon },
-		{ href: '/backups', label: 'Backups', icon: ArchiveIcon }
+		{ href: '/', label: 'Overview', icon: GaugeIcon },
+		{ href: '/apps', label: 'Apps', icon: LayoutGridIcon },
+		{ href: '/domains', label: 'Domains', icon: GlobeIcon },
+		{ href: '/backups', label: 'Backups', icon: ArchiveIcon },
+		{ href: '/settings', label: 'Settings', icon: SettingsIcon }
 	];
 
 	onMount(async () => {
@@ -98,15 +105,20 @@
 						{updating ? 'Updating…' : `Update to ${latest}`}
 					</Button>
 				{:else}
-					<Button variant="ghost" size="sm" class="justify-start gap-2" onclick={update} disabled={updating}>
-						<DownloadIcon class="size-4" />
-						{updating ? 'Updating…' : 'Update panel'}
+					<Button
+						variant="ghost"
+						size="sm"
+						class="justify-start gap-2 opacity-50"
+						disabled
+						title="You're on the latest version"
+					>
+						<CheckIcon class="size-4" /> Up to date
 					</Button>
 				{/if}
 				<Button variant="ghost" size="sm" class="justify-start gap-2" onclick={logout}>
 					<LogOutIcon class="size-4" /> Log out
 				</Button>
-				<p class="text-muted-foreground px-3 py-1 text-xs">{version}</p>
+				<p class="text-muted-foreground px-3 py-1 text-center text-xs">{version}</p>
 			</div>
 		</aside>
 		<main class="ml-56 p-6 lg:p-8">

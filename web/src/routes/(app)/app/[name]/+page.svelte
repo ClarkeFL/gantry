@@ -191,7 +191,7 @@
 </script>
 
 <div class="mx-auto max-w-4xl">
-	<a href="/" class="text-muted-foreground hover:text-foreground mb-4 inline-flex items-center gap-1 text-sm">
+	<a href="/apps" class="text-muted-foreground hover:text-foreground mb-4 inline-flex items-center gap-1 text-sm">
 		<ArrowLeftIcon class="size-4" /> Apps
 	</a>
 

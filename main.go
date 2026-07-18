@@ -40,6 +40,7 @@ func main() {
 		log.Fatalf("no auth config at %s — run `gantry init` first (%v)", authPath(), err)
 	}
 	loadMeta()
+	loadSettings()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/login", handleLogin)
@@ -48,6 +49,15 @@ func main() {
 		"GET /api/me":                    handleMe,
 		"POST /api/update":               handleUpdate,
 		"GET /api/update/check":          handleUpdateCheck,
+		"GET /api/stats":                 handleStats,
+		"GET /api/domains":               handleDomains,
+		"POST /api/apps":                 handleCreateApp,
+		"POST /api/services":             handleCreateService,
+		"GET /api/settings":              handleSettingsGet,
+		"POST /api/settings/github":      handleGitHubSet,
+		"POST /api/settings/password":    handleChangePassword,
+		"POST /api/settings/totp":        handleTOTPRegen,
+		"GET /api/settings/totp.png":     handleTOTPQR,
 		"GET /api/apps":                  handleApps,
 		"GET /api/apps/{name}":           handleAppDetail,
 		"POST /api/apps/{name}/env":      handleEnv,
