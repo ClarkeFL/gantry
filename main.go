@@ -41,6 +41,7 @@ func main() {
 	}
 	loadMeta()
 	loadSettings()
+	startStatsSampler()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/login", handleLogin)
