@@ -15,12 +15,11 @@
 	import DatabaseIcon from '@lucide/svelte/icons/database';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 
 	type App = { name: string; running: boolean; category: string };
-	type Service = { type: string; name: string; status: string };
 
 	let apps = $state<App[]>([]);
-	let services = $state<Service[]>([]);
 	let categories = $state<string[]>([]);
 	let loading = $state(true);
 
@@ -35,13 +34,6 @@
 	let newAppImage = $state('');
 	let creatingApp = $state(false);
 	let createLines = $state<string[]>([]);
-
-	// new database dialog
-	let newDbOpen = $state(false);
-	let newDbType = $state('postgres');
-	let newDbName = $state('');
-	let creatingDb = $state(false);
-	let dbLines = $state<string[]>([]);
 
 	// new category dialog
 	let newCatOpen = $state(false);
@@ -60,7 +52,6 @@
 		try {
 			const d = await api('/apps');
 			apps = d.apps ?? [];
-			services = d.services ?? [];
 			categories = d.categories ?? [];
 		} finally {
 			loading = false;
@@ -112,21 +103,15 @@
 		);
 	}
 
-	function createDb(e: SubmitEvent) {
-		e.preventDefault();
-		creatingDb = true;
-		dbLines = [];
-		stream(
-			'/services',
-			(l) => {
-				dbLines.push(l);
-			},
-			{ method: 'POST', body: JSON.stringify({ type: newDbType, name: newDbName.trim() }) },
-			() => {
-				creatingDb = false;
-				load();
-			}
-		);
+	async function deleteCategory(name: string) {
+		if (!confirm(`Delete category "${name}"? Apps in it move to Uncategorised.`)) return;
+		try {
+			await api('/categories', { method: 'DELETE', body: JSON.stringify({ name }) });
+			toast.success(`Deleted "${name}"`);
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		}
 	}
 
 	async function createCategory(e: SubmitEvent) {
@@ -159,9 +144,6 @@
 			<Button variant="outline" size="sm" onclick={() => (newCatOpen = true)}>
 				<FolderPlusIcon class="size-4" /> New category
 			</Button>
-			<Button variant="outline" size="sm" onclick={() => (newDbOpen = true)}>
-				<DatabaseIcon class="size-4" /> New database
-			</Button>
 			<Button size="sm" onclick={() => (newAppOpen = true)}>
 				<PlusIcon class="size-4" /> New app
 			</Button>
@@ -174,9 +156,30 @@
 		</div>
 	{:else}
 		{#each groups as [category, list] (category)}
-			<h2 class="text-muted-foreground mt-6 mb-2 text-xs font-medium tracking-widest uppercase first:mt-0">
-				{category}
-			</h2>
+			<div class="mt-8 mb-3 flex items-center gap-3 border-b pb-2 first:mt-0">
+				<h2 class="text-lg font-semibold tracking-tight">{category}</h2>
+				<button
+					class="text-muted-foreground hover:text-foreground"
+					onclick={() => {
+						newAppCategory = category === 'Uncategorised' ? '' : category;
+						newAppOpen = true;
+					}}
+					title="New app in {category}"
+					aria-label="New app in {category}"
+				>
+					<PlusIcon class="size-4" />
+				</button>
+				{#if category !== 'Uncategorised'}
+					<button
+						class="text-muted-foreground hover:text-destructive"
+						onclick={() => deleteCategory(category)}
+						title="Delete category"
+						aria-label="Delete category {category}"
+					>
+						<Trash2Icon class="size-4" />
+					</button>
+				{/if}
+			</div>
 			{#if list.length}
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 					{#each list as app (app.name)}
@@ -203,28 +206,6 @@
 		{:else}
 			<p class="text-muted-foreground text-sm">No apps yet — create one to get started.</p>
 		{/each}
-
-		<h2 class="text-muted-foreground mt-10 mb-2 text-xs font-medium tracking-widest uppercase">Databases</h2>
-		{#if services.length}
-			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-				{#each services as s (s.type + s.name)}
-					<Card.Root>
-						<Card.Header>
-							<Card.Title class="flex items-center gap-2 text-base">
-								<DatabaseIcon class="text-muted-foreground size-4" />
-								{s.name}
-								<Badge variant="secondary" class="ml-auto">{s.type}</Badge>
-							</Card.Title>
-							<Card.Description>{s.status}</Card.Description>
-						</Card.Header>
-					</Card.Root>
-				{/each}
-			</div>
-		{:else}
-			<p class="text-muted-foreground text-sm">
-				No database services yet — create one with the button above (needs the matching dokku plugin installed).
-			</p>
-		{/if}
 	{/if}
 </div>
 
@@ -306,35 +287,3 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root bind:open={newDbOpen}>
-	<Dialog.Content class="max-w-md">
-		<Dialog.Header>
-			<Dialog.Title>New database</Dialog.Title>
-			<Dialog.Description>
-				Runs <code>dokku &lt;type&gt;:create</code> — the matching plugin must be installed on the server.
-			</Dialog.Description>
-		</Dialog.Header>
-		<form onsubmit={createDb} class="grid gap-4">
-			<div class="grid gap-2">
-				<Label for="db-type">Type</Label>
-				<select id="db-type" bind:value={newDbType} class={srcInput}>
-					<option value="postgres">postgres</option>
-					<option value="mysql">mysql</option>
-					<option value="mariadb">mariadb</option>
-					<option value="redis">redis</option>
-					<option value="mongo">mongo</option>
-				</select>
-			</div>
-			<div class="grid gap-2">
-				<Label for="db-name">Name</Label>
-				<Input id="db-name" bind:value={newDbName} placeholder="main-db" required pattern="[a-z0-9][a-z0-9.-]*" />
-			</div>
-			<Button type="submit" disabled={creatingDb}>{creatingDb ? 'Creating…' : 'Create database'}</Button>
-		</form>
-		{#if dbLines.length}
-			<div class="bg-card mt-2 max-h-48 overflow-y-auto rounded-md border p-3 font-mono text-xs leading-5">
-				{#each dbLines as line, i (i)}<div class="whitespace-pre-wrap">{line}</div>{/each}
-			</div>
-		{/if}
-	</Dialog.Content>
-</Dialog.Root>

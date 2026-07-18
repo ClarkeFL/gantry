@@ -23,6 +23,9 @@ type panelSettings struct {
 	LEEmail     string         `json:"letsencrypt_email,omitempty"`
 	Categories  []string       `json:"categories,omitempty"`
 	Registries  []registryCred `json:"registries,omitempty"` // display only — docker stores the creds
+
+	DBCategories []string          `json:"db_categories,omitempty"`
+	DBCategory   map[string]string `json:"db_category,omitempty"` // "postgres/main-db" -> category
 }
 
 var (
@@ -172,6 +175,140 @@ func handleRegistryAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "registries": registries})
+}
+
+func handleDBCategoryCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Name string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		httpErr(w, 400, "category name required")
+		return
+	}
+	settingsMu.Lock()
+	found := false
+	for _, c := range settings.DBCategories {
+		if strings.EqualFold(c, req.Name) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		settings.DBCategories = append(settings.DBCategories, req.Name)
+	}
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleDBCategoryDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Name string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	settingsMu.Lock()
+	kept := settings.DBCategories[:0]
+	for _, c := range settings.DBCategories {
+		if !strings.EqualFold(c, req.Name) {
+			kept = append(kept, c)
+		}
+	}
+	settings.DBCategories = kept
+	for k, v := range settings.DBCategory {
+		if strings.EqualFold(v, req.Name) {
+			delete(settings.DBCategory, k)
+		}
+	}
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleServiceCategorySet(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Type, Name, Category string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	if !serviceTypes[req.Type] || !appRe.MatchString(req.Name) {
+		httpErr(w, 400, "bad service type or name")
+		return
+	}
+	settingsMu.Lock()
+	if settings.DBCategory == nil {
+		settings.DBCategory = map[string]string{}
+	}
+	key := req.Type + "/" + req.Name
+	if c := strings.TrimSpace(req.Category); c == "" {
+		delete(settings.DBCategory, key)
+	} else {
+		settings.DBCategory[key] = c
+	}
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleCategoryDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Name string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		httpErr(w, 400, "category name required")
+		return
+	}
+	settingsMu.Lock()
+	kept := settings.Categories[:0]
+	for _, c := range settings.Categories {
+		if !strings.EqualFold(c, req.Name) {
+			kept = append(kept, c)
+		}
+	}
+	settings.Categories = kept
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	// apps in the deleted category fall back to Uncategorised
+	metaMu.Lock()
+	changed := false
+	for _, m := range meta {
+		if strings.EqualFold(m.Category, req.Name) {
+			m.Category = ""
+			changed = true
+		}
+	}
+	if changed {
+		err = saveMeta()
+	}
+	metaMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 func handleCategoryCreate(w http.ResponseWriter, r *http.Request) {

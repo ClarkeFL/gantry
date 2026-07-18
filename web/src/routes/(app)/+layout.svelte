@@ -8,6 +8,7 @@
 	import AnchorIcon from '@lucide/svelte/icons/anchor';
 	import GaugeIcon from '@lucide/svelte/icons/gauge';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
+	import DatabaseIcon from '@lucide/svelte/icons/database';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import ArchiveIcon from '@lucide/svelte/icons/archive';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
@@ -27,6 +28,7 @@
 	const nav = [
 		{ href: '/', label: 'Overview', icon: GaugeIcon },
 		{ href: '/apps', label: 'Apps', icon: LayoutGridIcon },
+		{ href: '/databases', label: 'Databases', icon: DatabaseIcon },
 		{ href: '/domains', label: 'Domains', icon: GlobeIcon },
 		{ href: '/backups', label: 'Backups', icon: ArchiveIcon }
 	];

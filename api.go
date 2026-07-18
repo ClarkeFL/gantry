@@ -71,7 +71,7 @@ func handleApps(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Strings(cats)
-	writeJSON(w, map[string]any{"apps": apps, "services": listServices(), "categories": cats})
+	writeJSON(w, map[string]any{"apps": apps, "categories": cats})
 }
 
 func handleAppDetail(w http.ResponseWriter, r *http.Request) {
@@ -320,6 +320,37 @@ func handleCronPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"jobs": req.Jobs})
+}
+
+func handleServicesGet(w http.ResponseWriter, r *http.Request) {
+	type svcOut struct {
+		Type     string `json:"type"`
+		Name     string `json:"name"`
+		Status   string `json:"status"`
+		Category string `json:"category"`
+	}
+	svcs := listServices()
+	settingsMu.Lock()
+	catSet := map[string]bool{}
+	cats := []string{}
+	for _, c := range settings.DBCategories {
+		if !catSet[c] {
+			catSet[c] = true
+			cats = append(cats, c)
+		}
+	}
+	out := make([]svcOut, 0, len(svcs))
+	for _, s := range svcs {
+		cat := settings.DBCategory[s.Type+"/"+s.Name]
+		if cat != "" && !catSet[cat] {
+			catSet[cat] = true
+			cats = append(cats, cat)
+		}
+		out = append(out, svcOut{s.Type, s.Name, s.Status, cat})
+	}
+	settingsMu.Unlock()
+	sort.Strings(cats)
+	writeJSON(w, map[string]any{"services": out, "categories": cats})
 }
 
 func handleCreateApp(w http.ResponseWriter, r *http.Request) {
