@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { api, stream } from '$lib/api';
+	import { api } from '$lib/api';
 	import { toast } from 'svelte-sonner';
 	import { askConfirm } from '$lib/confirm.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -30,13 +30,7 @@
 	let newAppOpen = $state(false);
 	let newAppName = $state('');
 	let newAppCategory = $state('');
-	let newAppSource = $state<'empty' | 'repo' | 'image'>('empty');
-	let newAppRepo = $state('');
-	let newAppRef = $state('');
-	let newAppDockerfile = $state('');
-	let newAppImage = $state('');
 	let creatingApp = $state(false);
-	let createLines = $state<string[]>([]);
 
 	// new category dialog
 	let newCatOpen = $state(false);
@@ -96,35 +90,14 @@
 				method: 'POST',
 				body: JSON.stringify({ name: n, category: newAppCategory.trim() })
 			});
+			toast.success(`Created ${n} — pick a source to deploy`);
+			newAppOpen = false;
+			goto(`/app/${n}?tab=source`);
 		} catch (e) {
 			toast.error(msg(e));
+		} finally {
 			creatingApp = false;
-			return;
 		}
-		if (newAppSource === 'empty') {
-			toast.success(`Created ${n}`);
-			newAppOpen = false;
-			creatingApp = false;
-			goto('/app/' + n);
-			return;
-		}
-		const body =
-			newAppSource === 'repo'
-				? { repo: newAppRepo.trim(), ref: newAppRef.trim(), dockerfile: newAppDockerfile.trim() }
-				: { image: newAppImage.trim() };
-		createLines = [];
-		stream(
-			`/apps/${n}/deploy`,
-			(l) => {
-				createLines.push(l);
-			},
-			{ method: 'POST', body: JSON.stringify(body) },
-			() => {
-				creatingApp = false;
-				newAppOpen = false;
-				goto('/app/' + n);
-			}
-		);
 	}
 
 	async function deleteCategory(name: string) {
@@ -154,8 +127,6 @@
 		}
 	}
 
-	const srcInput =
-		'border-input bg-transparent dark:bg-input/30 h-9 rounded-md border px-3 text-sm shadow-xs';
 </script>
 
 <div class="mx-auto max-w-5xl">
@@ -269,13 +240,22 @@
 	<Dialog.Content class="max-w-lg">
 		<Dialog.Header>
 			<Dialog.Title>New app</Dialog.Title>
-			<Dialog.Description>Create the app and optionally deploy it right away.</Dialog.Description>
+			<Dialog.Description>You'll pick a deploy source on the app's Source tab next.</Dialog.Description>
 		</Dialog.Header>
 		<form onsubmit={createApp} class="grid gap-4">
 			<div class="grid grid-cols-2 gap-3">
 				<div class="grid gap-2">
 					<Label for="app-name">Name</Label>
-					<Input id="app-name" bind:value={newAppName} placeholder="my-api" required pattern="[a-z0-9][a-z0-9.-]*" />
+					<Input
+						id="app-name"
+						bind:value={newAppName}
+						placeholder="my-api"
+						required
+						pattern="[a-z0-9][a-z0-9.-]*"
+						autocapitalize="off"
+						autocorrect="off"
+						spellcheck={false}
+					/>
 				</div>
 				<div class="grid gap-2">
 					<Label for="app-cat">Category</Label>
@@ -285,48 +265,8 @@
 					</datalist>
 				</div>
 			</div>
-			<div class="grid gap-2">
-				<Label for="app-src">Deploy from</Label>
-				<select id="app-src" bind:value={newAppSource} class={srcInput}>
-					<option value="empty">Nothing yet — empty app</option>
-					<option value="repo">GitHub repository (builds on the server)</option>
-					<option value="image">Docker image (registry)</option>
-				</select>
-			</div>
-			{#if newAppSource === 'repo'}
-				<div class="grid gap-2">
-					<Label for="app-repo">Repository URL</Label>
-					<Input id="app-repo" bind:value={newAppRepo} required placeholder="https://github.com/you/repo" class="font-mono text-xs" />
-				</div>
-				<div class="grid grid-cols-2 gap-3">
-					<div class="grid gap-2">
-						<Label for="app-ref">Branch <span class="text-muted-foreground">(optional)</span></Label>
-						<Input id="app-ref" bind:value={newAppRef} placeholder="main" class="font-mono text-xs" />
-					</div>
-					<div class="grid gap-2">
-						<Label for="app-df">Dockerfile path <span class="text-muted-foreground">(optional)</span></Label>
-						<Input id="app-df" bind:value={newAppDockerfile} placeholder="Dockerfile" class="font-mono text-xs" />
-					</div>
-				</div>
-				<p class="text-muted-foreground text-xs">
-					Private repo? Save your GitHub username + token in Settings first. No Dockerfile in the repo
-					means dokku builds with buildpacks (auto-detected).
-				</p>
-			{:else if newAppSource === 'image'}
-				<div class="grid gap-2">
-					<Label for="app-img">Image</Label>
-					<Input id="app-img" bind:value={newAppImage} required placeholder="ghcr.io/you/app:latest" class="font-mono text-xs" />
-				</div>
-			{/if}
-			<Button type="submit" disabled={creatingApp}>
-				{creatingApp ? 'Working…' : newAppSource === 'empty' ? 'Create app' : 'Create & deploy'}
-			</Button>
+			<Button type="submit" disabled={creatingApp}>{creatingApp ? 'Creating…' : 'Create app'}</Button>
 		</form>
-		{#if createLines.length}
-			<div class="bg-card mt-2 max-h-64 overflow-y-auto rounded-md border p-3 font-mono text-xs leading-5">
-				{#each createLines as line, i (i)}<div class="whitespace-pre-wrap">{line}</div>{/each}
-			</div>
-		{/if}
 	</Dialog.Content>
 </Dialog.Root>
 

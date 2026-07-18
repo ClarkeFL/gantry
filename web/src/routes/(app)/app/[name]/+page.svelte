@@ -46,7 +46,7 @@
 	const name = $derived(page.params.name!);
 
 	let d = $state<Detail | null>(null);
-	let tab = $state('overview');
+	let tab = $state(page.url.searchParams.get('tab') ?? 'overview');
 
 	// env editor
 	let rows = $state<{ key: string; value: string }[]>([]);
@@ -589,11 +589,18 @@
 						</Card.Description>
 					</Card.Header>
 					<Card.Content class="flex max-w-md gap-2">
-						<Input bind:value={destroyConfirm} placeholder={d.name} class="font-mono text-xs" />
+						<Input
+							bind:value={destroyConfirm}
+							placeholder={d.name}
+							class="font-mono text-xs"
+							autocapitalize="off"
+							autocorrect="off"
+							spellcheck={false}
+						/>
 						<Button
 							variant="destructive"
 							class="shrink-0"
-							disabled={destroyConfirm !== d.name || destroying}
+							disabled={destroyConfirm.trim().toLowerCase() !== d.name.toLowerCase() || destroying}
 							onclick={destroyApp}
 						>
 							<Trash2Icon class="size-4" />
