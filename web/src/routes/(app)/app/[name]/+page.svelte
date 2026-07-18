@@ -79,6 +79,8 @@
 	let srcBuildDir = $state('');
 	let srcDf = $state('');
 	let srcImage = $state('');
+	let imgUser = $state('');
+	let imgPass = $state('');
 	let savingSrc = $state(false);
 	const sourceSummary = $derived(
 		srcType === 'repo' && srcRepo
@@ -189,6 +191,17 @@
 	async function saveSource(andDeploy = false) {
 		savingSrc = true;
 		try {
+			if (srcType === 'image' && imgUser.trim() && imgPass) {
+				const seg = srcImage.split('/')[0];
+				const server = seg.includes('.') || seg.includes(':') ? seg : 'docker.io';
+				await api('/settings/registry', {
+					method: 'POST',
+					body: JSON.stringify({ server, user: imgUser.trim(), password: imgPass })
+				});
+				toast.success(`Logged in to ${server}`);
+				imgUser = '';
+				imgPass = '';
+			}
 			await api(`/apps/${name}/source`, {
 				method: 'PUT',
 				body: JSON.stringify({
@@ -427,8 +440,22 @@
 						{:else if srcType === 'image'}
 							<div class="grid gap-2">
 								<Label for="src-img">Image</Label>
-								<Input id="src-img" class="font-mono text-xs" placeholder="ghcr.io/you/app:latest" bind:value={srcImage} />
+								<Input id="src-img" class="font-mono text-xs" placeholder="ghcr.io/you/app:latest or you/app:latest" bind:value={srcImage} />
 							</div>
+							<div class="grid grid-cols-2 gap-3">
+								<div class="grid gap-2">
+									<Label for="src-imguser">Username <span class="text-muted-foreground">(private image)</span></Label>
+									<Input id="src-imguser" bind:value={imgUser} autocomplete="off" />
+								</div>
+								<div class="grid gap-2">
+									<Label for="src-imgpass">Password / token</Label>
+									<Input id="src-imgpass" type="password" bind:value={imgPass} autocomplete="new-password" />
+								</div>
+							</div>
+							<p class="text-muted-foreground text-xs">
+								Only needed for private images. Credentials go straight to <code>docker login</code> on the
+								server on Save — the panel doesn't store them. Existing logins: Settings → Docker registries.
+							</p>
 						{/if}
 						<div class="flex gap-2">
 							<Button variant="outline" onclick={() => saveSource(false)} disabled={savingSrc}>Save</Button>
