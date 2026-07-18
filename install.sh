@@ -22,6 +22,9 @@ if ! command -v dokku >/dev/null 2>&1; then
   DOKKU_TAG="$DOKKU_TAG" bash /tmp/dokku-bootstrap.sh
 fi
 
+# 1b. letsencrypt plugin for one-click SSL (skipped if present)
+dokku plugin:installed letsencrypt >/dev/null 2>&1 || dokku plugin:install https://github.com/dokku/dokku-letsencrypt.git
+
 # 2. gantry binary from latest GitHub release
 ARCH="$(uname -m)"
 case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac

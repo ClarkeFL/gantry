@@ -90,6 +90,7 @@ var (
 		"landing": {},
 	}
 	mockRunning = map[string]bool{"blog": true, "api": true, "landing": false}
+	mockSSL     = map[string]bool{"blog": true}
 	mockDomains = map[string][]string{
 		"blog":    {"blog.example.com"},
 		"api":     {"api.example.com"},
@@ -158,6 +159,25 @@ func mockDokku(args []string) (string, error) {
 		return strings.Join(mockDomains[args[1]], " "), nil
 	case verb == "cron:list":
 		return "", nil
+	case verb == "domains:add":
+		mockDomains[args[1]] = append(mockDomains[args[1]], args[2])
+		return "-----> Added " + args[2], nil
+	case verb == "domains:remove":
+		kept := []string{}
+		for _, d := range mockDomains[args[1]] {
+			if d != args[2] {
+				kept = append(kept, d)
+			}
+		}
+		mockDomains[args[1]] = kept
+		return "-----> Removed " + args[2], nil
+	case verb == "letsencrypt:active":
+		if mockSSL[args[1]] {
+			return "true", nil
+		}
+		return "false", fmt.Errorf("not active")
+	case strings.HasPrefix(verb, "letsencrypt:"):
+		return "-----> OK", nil
 	default:
 		return "", fmt.Errorf("mock: unhandled dokku %s %s", verb, app)
 	}

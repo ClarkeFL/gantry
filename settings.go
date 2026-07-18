@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -17,6 +18,7 @@ import (
 type panelSettings struct {
 	GitHubUser  string `json:"github_user,omitempty"`
 	GitHubToken string `json:"github_token,omitempty"`
+	LEEmail     string `json:"letsencrypt_email,omitempty"`
 }
 
 var (
@@ -57,12 +59,44 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 	} else if n > 0 {
 		masked = "••••••••"
 	}
+	settingsMu.Lock()
+	leEmail := settings.LEEmail
+	settingsMu.Unlock()
 	writeJSON(w, map[string]any{
 		"githubUser":  user,
 		"githubToken": masked,
+		"leEmail":     leEmail,
 		"totpSecret":  auth.TOTPSecret,
 		"totpURI":     otpauthURI(),
 	})
+}
+
+func handleLEEmail(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Email string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	req.Email = strings.TrimSpace(req.Email)
+	if req.Email == "" || !strings.Contains(req.Email, "@") {
+		httpErr(w, 400, "enter a valid email")
+		return
+	}
+	settingsMu.Lock()
+	settings.LEEmail = req.Email
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	if !mockMode {
+		if out, err := dokku("letsencrypt:set", "--global", "email", req.Email); err != nil {
+			httpErr(w, 500, "saved, but dokku rejected it: "+out+" (is the letsencrypt plugin installed?)")
+			return
+		}
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 func handleGitHubSet(w http.ResponseWriter, r *http.Request) {

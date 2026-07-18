@@ -27,6 +27,10 @@
 	let ghToken = $state('');
 	let savingGh = $state(false);
 
+	// letsencrypt
+	let leEmail = $state('');
+	let savingLe = $state(false);
+
 	function msg(e: unknown) {
 		return e instanceof Error ? e.message : String(e);
 	}
@@ -37,7 +41,21 @@
 		githubUser = s.githubUser;
 		githubTokenMasked = s.githubToken;
 		ghUser = s.githubUser;
+		leEmail = s.leEmail;
 	});
+
+	async function saveLeEmail(e: SubmitEvent) {
+		e.preventDefault();
+		savingLe = true;
+		try {
+			await api('/settings/letsencrypt', { method: 'POST', body: JSON.stringify({ email: leEmail.trim() }) });
+			toast.success("Let's Encrypt email saved");
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			savingLe = false;
+		}
+	}
 
 	async function changePassword(e: SubmitEvent) {
 		e.preventDefault();
@@ -153,6 +171,21 @@
 				<Button type="submit" class="mt-1 w-fit" disabled={savingPw}>
 					{savingPw ? 'Saving…' : 'Change password'}
 				</Button>
+			</form>
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="text-base">Let's Encrypt</Card.Title>
+			<Card.Description>
+				Email used for certificate registration and expiry notices — required before enabling HTTPS on any app.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content>
+			<form onsubmit={saveLeEmail} class="flex max-w-sm gap-2">
+				<Input type="email" bind:value={leEmail} required placeholder="you@example.com" />
+				<Button type="submit" variant="outline" disabled={savingLe}>Save</Button>
 			</form>
 		</Card.Content>
 	</Card.Root>

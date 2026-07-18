@@ -19,6 +19,9 @@
 	import RocketIcon from '@lucide/svelte/icons/rocket';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import LockIcon from '@lucide/svelte/icons/lock';
+	import XIcon from '@lucide/svelte/icons/x';
+	import UploadIcon from '@lucide/svelte/icons/upload';
 
 	type Job = { id: string; schedule: string; command: string; last?: string };
 	type Detail = {
@@ -27,6 +30,7 @@
 		category: string;
 		env: Record<string, string>;
 		domains: string[];
+		ssl: boolean;
 		jobs: Job[];
 		nativeCron: string;
 	};
@@ -62,6 +66,13 @@
 	let image = $state('');
 	let stopDeploy: (() => void) | null = null;
 
+	// domains + ssl
+	let newDomain = $state('');
+	let sslOpen = $state(false);
+	let sslRunning = $state(false);
+	let sslLines = $state<string[]>([]);
+	let stopSSL: (() => void) | null = null;
+
 	function msg(e: unknown) {
 		return e instanceof Error ? e.message : String(e);
 	}
@@ -79,6 +90,7 @@
 	onDestroy(() => {
 		stopLogs?.();
 		stopDeploy?.();
+		stopSSL?.();
 	});
 
 	$effect(() => {
@@ -120,6 +132,59 @@
 				load();
 			}
 		);
+	}
+
+	async function modDomain(action: 'add' | 'remove', domain: string) {
+		try {
+			await api(`/apps/${name}/domains`, { method: 'POST', body: JSON.stringify({ action, domain }) });
+			toast.success(`${action === 'add' ? 'Added' : 'Removed'} ${domain}`);
+			newDomain = '';
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		}
+	}
+
+	function enableSSL() {
+		sslRunning = true;
+		sslLines = [];
+		stopSSL = stream(
+			`/apps/${name}/ssl`,
+			(l) => {
+				sslLines.push(l);
+			},
+			{ method: 'POST' },
+			() => {
+				sslRunning = false;
+				load();
+			}
+		);
+	}
+
+	function importEnvFile(e: Event) {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (!file) return;
+		file.text().then((text) => {
+			let count = 0;
+			for (let line of text.split('\n')) {
+				line = line.trim();
+				if (!line || line.startsWith('#')) continue;
+				line = line.replace(/^export\s+/, '');
+				const eq = line.indexOf('=');
+				if (eq < 1) continue;
+				const key = line.slice(0, eq).trim();
+				let value = line.slice(eq + 1).trim();
+				if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+					value = value.slice(1, -1);
+				}
+				const existing = rows.find((r) => r.key === key);
+				if (existing) existing.value = value;
+				else rows.push({ key, value });
+				count++;
+			}
+			toast.success(`Imported ${count} variables — review below, then Save changes`);
+		});
+		(e.target as HTMLInputElement).value = '';
 	}
 
 	async function saveEnv() {
@@ -231,17 +296,50 @@
 			<Tabs.Content value="overview" class="mt-4 grid gap-4">
 				<Card.Root>
 					<Card.Header>
-						<Card.Title class="text-base">Domains</Card.Title>
-						<Card.Description>Managed via <code>dokku domains</code> / <code>dokku letsencrypt</code> for now.</Card.Description>
+						<Card.Title class="flex items-center gap-2 text-base">
+							Domains
+							{#if d.ssl}
+								<Badge variant="secondary" class="gap-1"><LockIcon class="size-3" /> https</Badge>
+							{/if}
+						</Card.Title>
+						<Card.Description>
+							Point the domain's DNS at this server first, then enable HTTPS for a Let's Encrypt certificate.
+						</Card.Description>
 					</Card.Header>
-					<Card.Content class="flex flex-wrap gap-2">
-						{#each d.domains as domain (domain)}
-							<a href="https://{domain}" target="_blank" rel="noreferrer">
-								<Badge variant="outline">{domain}</Badge>
-							</a>
-						{:else}
-							<p class="text-muted-foreground text-sm">No domains configured.</p>
-						{/each}
+					<Card.Content class="grid gap-3">
+						<div class="flex flex-wrap gap-2">
+							{#each d.domains as domain (domain)}
+								<Badge variant="outline" class="gap-1 pr-1">
+									<a href="https://{domain}" target="_blank" rel="noreferrer" class="hover:underline">{domain}</a>
+									<button
+										class="text-muted-foreground hover:text-destructive ml-0.5"
+										onclick={() => modDomain('remove', domain)}
+										aria-label="Remove {domain}"
+									>
+										<XIcon class="size-3" />
+									</button>
+								</Badge>
+							{:else}
+								<p class="text-muted-foreground text-sm">No domains configured.</p>
+							{/each}
+						</div>
+						<div class="flex max-w-md gap-2">
+							<Input bind:value={newDomain} placeholder="app.example.com" class="font-mono text-xs" />
+							<Button
+								variant="outline"
+								size="sm"
+								class="shrink-0"
+								disabled={!newDomain.trim()}
+								onclick={() => modDomain('add', newDomain.trim())}
+							>
+								<PlusIcon class="size-4" /> Add
+							</Button>
+							{#if d.domains.length && !d.ssl}
+								<Button size="sm" class="shrink-0" onclick={() => { sslOpen = true; }}>
+									<LockIcon class="size-4" /> Enable HTTPS
+								</Button>
+							{/if}
+						</div>
 					</Card.Content>
 				</Card.Root>
 
@@ -291,10 +389,14 @@
 						{:else}
 							<p class="text-muted-foreground text-sm">No variables set.</p>
 						{/each}
-						<div class="mt-2 flex items-center gap-4">
+						<div class="mt-2 flex items-center gap-2">
 							<Button variant="outline" size="sm" onclick={() => rows.push({ key: '', value: '' })}>
 								<PlusIcon class="size-4" /> Add variable
 							</Button>
+							<Button variant="outline" size="sm" onclick={() => document.getElementById('env-file')?.click()}>
+								<UploadIcon class="size-4" /> Import .env
+							</Button>
+							<input id="env-file" type="file" accept=".env,text/plain,.txt" class="hidden" onchange={importEnvFile} />
 							<div class="ml-auto flex items-center gap-2">
 								<Switch id="restart" bind:checked={restartAfterSave} />
 								<Label for="restart" class="text-sm">Restart app</Label>
@@ -370,6 +472,27 @@
 		</Tabs.Root>
 	{/if}
 </div>
+
+<Dialog.Root bind:open={sslOpen}>
+	<Dialog.Content class="max-w-xl">
+		<Dialog.Header>
+			<Dialog.Title>Enable HTTPS for {name}</Dialog.Title>
+			<Dialog.Description>
+				Requests a Let's Encrypt certificate for all domains on this app and sets up auto-renewal.
+				The domains must already resolve to this server or issuance fails.
+			</Dialog.Description>
+		</Dialog.Header>
+		<Button onclick={enableSSL} disabled={sslRunning} class="w-fit">
+			<LockIcon class="size-4" />
+			{sslRunning ? 'Requesting certificate…' : 'Request certificate'}
+		</Button>
+		{#if sslLines.length}
+			<div class="bg-card mt-2 max-h-64 overflow-y-auto rounded-md border p-3 font-mono text-xs leading-5">
+				{#each sslLines as line, i (i)}<div class="whitespace-pre-wrap">{line}</div>{/each}
+			</div>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
 
 <Dialog.Root bind:open={deployOpen}>
 	<Dialog.Content class="max-w-2xl">

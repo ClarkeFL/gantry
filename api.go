@@ -68,6 +68,7 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	envVars := map[string]string{}
 	json.Unmarshal([]byte(envJSON), &envVars)
 	domainsOut, _ := dokku("domains:report", name, "--domains-app-vhosts")
+	_, sslErr := dokku("letsencrypt:active", name)
 	nativeCron, _ := dokku("cron:list", name)
 	metaMu.Lock()
 	m := getMeta(name)
@@ -84,6 +85,7 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 		"category":   category,
 		"env":        envVars,
 		"domains":    strings.Fields(domainsOut),
+		"ssl":        sslErr == nil,
 		"jobs":       jobs,
 		"nativeCron": nativeCron,
 	})
@@ -277,6 +279,71 @@ func handleCreateService(w http.ResponseWriter, r *http.Request) {
 	}
 	// first create on a plugin pulls its image — stream so the UI shows progress
 	streamCmd(r.Context(), send, "dokku", req.Type+":create", req.Name)
+	send("[gantry] done")
+}
+
+var domainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+
+func handleDomainsMod(w http.ResponseWriter, r *http.Request) {
+	name, ok := appName(w, r)
+	if !ok {
+		return
+	}
+	var req struct{ Action, Domain string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	req.Domain = strings.ToLower(strings.TrimSpace(req.Domain))
+	if !domainRe.MatchString(req.Domain) {
+		httpErr(w, 400, "that doesn't look like a domain")
+		return
+	}
+	var cmd string
+	switch req.Action {
+	case "add":
+		cmd = "domains:add"
+	case "remove":
+		cmd = "domains:remove"
+	default:
+		httpErr(w, 400, "action must be add or remove")
+		return
+	}
+	if out, err := dokku(cmd, name, req.Domain); err != nil {
+		httpErr(w, 500, out)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleSSL streams `dokku letsencrypt:enable <app>` and registers the renewal cron.
+func handleSSL(w http.ResponseWriter, r *http.Request) {
+	name, ok := appName(w, r)
+	if !ok {
+		return
+	}
+	send, ok := sseStart(w)
+	if !ok {
+		return
+	}
+	settingsMu.Lock()
+	email := settings.LEEmail
+	settingsMu.Unlock()
+	if email == "" {
+		send("[error] set your Let's Encrypt email in Settings first")
+		return
+	}
+	if mockMode {
+		send("-----> Enabling letsencrypt for " + name)
+		send("-----> Certificate retrieved and installed")
+		mockMu.Lock()
+		mockSSL[name] = true
+		mockMu.Unlock()
+		send("[gantry] done")
+		return
+	}
+	streamCmd(r.Context(), send, "dokku", "letsencrypt:enable", name)
+	dokku("letsencrypt:cron-job", "--add") // idempotent auto-renew
 	send("[gantry] done")
 }
 
