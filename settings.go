@@ -266,6 +266,57 @@ func handleServiceCategorySet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
+func readNames(r *http.Request) ([]string, bool) {
+	var req struct{ Names []string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return nil, false
+	}
+	out := []string{}
+	seen := map[string]bool{}
+	for _, n := range req.Names {
+		n = strings.TrimSpace(n)
+		if n != "" && !strings.EqualFold(n, "Uncategorised") && !seen[strings.ToLower(n)] {
+			seen[strings.ToLower(n)] = true
+			out = append(out, n)
+		}
+	}
+	return out, true
+}
+
+func handleCategoryOrder(w http.ResponseWriter, r *http.Request) {
+	names, ok := readNames(r)
+	if !ok {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	settingsMu.Lock()
+	settings.Categories = names
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleDBCategoryOrder(w http.ResponseWriter, r *http.Request) {
+	names, ok := readNames(r)
+	if !ok {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	settingsMu.Lock()
+	settings.DBCategories = names
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
 func handleCategoryDelete(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Name string }
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -70,7 +70,7 @@ func handleApps(w http.ResponseWriter, r *http.Request) {
 			cats = append(cats, a.Category)
 		}
 	}
-	sort.Strings(cats)
+	// order = stored list order (user-arranged), app-derived extras appended
 	writeJSON(w, map[string]any{"apps": apps, "categories": cats})
 }
 
@@ -349,7 +349,6 @@ func handleServicesGet(w http.ResponseWriter, r *http.Request) {
 		out = append(out, svcOut{s.Type, s.Name, s.Status, cat})
 	}
 	settingsMu.Unlock()
-	sort.Strings(cats)
 	writeJSON(w, map[string]any{"services": out, "categories": cats})
 }
 

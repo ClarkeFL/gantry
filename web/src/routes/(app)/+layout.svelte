@@ -3,7 +3,9 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
+	import { confirmState, askConfirm, answerConfirm } from '$lib/confirm.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import { toast } from 'svelte-sonner';
 	import AnchorIcon from '@lucide/svelte/icons/anchor';
 	import GaugeIcon from '@lucide/svelte/icons/gauge';
@@ -65,7 +67,7 @@
 	}
 
 	async function update() {
-		if (!confirm(`Download ${latest || 'the latest version'} and restart the panel?`)) return;
+		if (!(await askConfirm(`Download ${latest || 'the latest version'} and restart the panel?`))) return;
 		updating = true;
 		try {
 			await api('/update', { method: 'POST' });
@@ -160,3 +162,21 @@
 		</main>
 	</div>
 {/if}
+
+<Dialog.Root
+	bind:open={confirmState.open}
+	onOpenChange={(o) => {
+		if (!o) answerConfirm(false);
+	}}
+>
+	<Dialog.Content class="max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>Are you sure?</Dialog.Title>
+			<Dialog.Description>{confirmState.message}</Dialog.Description>
+		</Dialog.Header>
+		<div class="flex justify-end gap-2">
+			<Button variant="outline" onclick={() => answerConfirm(false)}>Cancel</Button>
+			<Button variant="destructive" onclick={() => answerConfirm(true)}>Confirm</Button>
+		</div>
+	</Dialog.Content>
+</Dialog.Root>

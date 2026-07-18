@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
 	import { toast } from 'svelte-sonner';
+	import { askConfirm } from '$lib/confirm.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -110,7 +111,7 @@
 
 	async function disableTotp(e: SubmitEvent) {
 		e.preventDefault();
-		if (!confirm('Disable 2FA? Login falls back to email + password only.')) return;
+		if (!(await askConfirm('Disable 2FA? Login falls back to email + password only.'))) return;
 		totpBusy = true;
 		try {
 			await api('/settings/totp/disable', { method: 'POST', body: JSON.stringify({ password: disablePassword }) });

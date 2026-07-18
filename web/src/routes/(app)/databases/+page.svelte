@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { api, stream } from '$lib/api';
 	import { toast } from 'svelte-sonner';
+	import { askConfirm } from '$lib/confirm.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
@@ -14,6 +15,7 @@
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
 
 	type Service = { type: string; name: string; status: string; category: string };
 
@@ -42,12 +44,27 @@
 	let newCatName = $state('');
 	let creatingCat = $state(false);
 
+	let dragIdx = $state(-1);
+
 	const groups = $derived.by(() => {
 		const g: Record<string, Service[]> = {};
 		for (const c of categories) g[c] ??= [];
 		for (const s of services) (g[s.category || 'Uncategorised'] ??= []).push(s);
-		return Object.entries(g).sort(([a], [b]) => a.localeCompare(b));
+		const ordered: [string, Service[]][] = categories.map((c) => [c, g[c] ?? []]);
+		if (g['Uncategorised']?.length) ordered.push(['Uncategorised', g['Uncategorised']]);
+		return ordered;
 	});
+
+	async function moveCategory(from: number, to: number) {
+		if (from === to || from < 0 || to < 0) return;
+		const next = [...categories];
+		const [c] = next.splice(from, 1);
+		next.splice(to, 0, c);
+		categories = next;
+		await api('/dbcategories/order', { method: 'PUT', body: JSON.stringify({ names: next }) }).catch((e) =>
+			toast.error(msg(e))
+		);
+	}
 
 	function msg(e: unknown) {
 		return e instanceof Error ? e.message : String(e);
@@ -127,7 +144,7 @@
 	}
 
 	async function deleteCategory(name: string) {
-		if (!confirm(`Delete category "${name}"? Databases in it move to Uncategorised.`)) return;
+		if (!(await askConfirm(`Delete category "${name}"? Databases in it move to Uncategorised.`))) return;
 		try {
 			await api('/dbcategories', { method: 'DELETE', body: JSON.stringify({ name }) });
 			toast.success(`Deleted "${name}"`);
@@ -166,7 +183,26 @@
 		</div>
 	{:else}
 		{#each groups as [category, list] (category)}
-			<div class="mt-8 mb-3 flex items-center gap-3 border-b pb-2 first:mt-0">
+			<div
+				class="mt-8 mb-3 flex items-center gap-3 border-b pb-2 first:mt-0"
+				role="listitem"
+				draggable={category !== 'Uncategorised'}
+				ondragstart={(e) => {
+					dragIdx = categories.indexOf(category);
+					e.dataTransfer?.setData('text/plain', category);
+				}}
+				ondragover={(e) => {
+					if (category !== 'Uncategorised') e.preventDefault();
+				}}
+				ondrop={(e) => {
+					e.preventDefault();
+					moveCategory(dragIdx, categories.indexOf(category));
+					dragIdx = -1;
+				}}
+			>
+				{#if category !== 'Uncategorised'}
+					<GripVerticalIcon class="text-muted-foreground size-4 cursor-grab" />
+				{/if}
 				<h2 class="text-lg font-semibold tracking-tight">{category}</h2>
 				<button
 					class="text-muted-foreground hover:text-foreground"
