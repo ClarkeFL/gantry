@@ -20,8 +20,8 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import LockIcon from '@lucide/svelte/icons/lock';
-	import XIcon from '@lucide/svelte/icons/x';
 	import UploadIcon from '@lucide/svelte/icons/upload';
+	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 
 	type Job = { id: string; schedule: string; command: string; last?: string };
 	type Detail = {
@@ -306,40 +306,55 @@
 							Point the domain's DNS at this server first, then enable HTTPS for a Let's Encrypt certificate.
 						</Card.Description>
 					</Card.Header>
-					<Card.Content class="grid gap-3">
-						<div class="flex flex-wrap gap-2">
+					<Card.Content>
+						<div class="divide-border overflow-hidden rounded-lg border divide-y">
 							{#each d.domains as domain (domain)}
-								<Badge variant="outline" class="gap-1 pr-1">
-									<a href="https://{domain}" target="_blank" rel="noreferrer" class="hover:underline">{domain}</a>
+								<div class="bg-muted/30 flex items-center gap-1 px-3 py-2">
+									<span class="text-muted-foreground font-mono text-xs">{d.ssl ? 'https://' : 'http://'}</span>
+									<span class="flex-1 truncate font-mono text-xs">{domain}</span>
+									{#if d.ssl}<LockIcon class="size-3.5 text-emerald-500" />{/if}
+									<a
+										href="{d.ssl ? 'https' : 'http'}://{domain}"
+										target="_blank"
+										rel="noreferrer"
+										class="text-muted-foreground hover:text-foreground p-1.5"
+										aria-label="Open {domain}"
+									>
+										<ExternalLinkIcon class="size-4" />
+									</a>
 									<button
-										class="text-muted-foreground hover:text-destructive ml-0.5"
+										class="text-muted-foreground hover:text-destructive p-1.5"
 										onclick={() => modDomain('remove', domain)}
 										aria-label="Remove {domain}"
 									>
-										<XIcon class="size-3" />
+										<Trash2Icon class="size-4" />
 									</button>
-								</Badge>
+								</div>
 							{:else}
-								<p class="text-muted-foreground text-sm">No domains configured.</p>
+								<p class="text-muted-foreground px-3 py-2 text-sm">No domains configured.</p>
 							{/each}
-						</div>
-						<div class="flex max-w-md gap-2">
-							<Input bind:value={newDomain} placeholder="app.example.com" class="font-mono text-xs" />
-							<Button
-								variant="outline"
-								size="sm"
-								class="shrink-0"
-								disabled={!newDomain.trim()}
-								onclick={() => modDomain('add', newDomain.trim())}
-							>
-								<PlusIcon class="size-4" /> Add
-							</Button>
-							{#if d.domains.length && !d.ssl}
-								<Button size="sm" class="shrink-0" onclick={() => { sslOpen = true; }}>
-									<LockIcon class="size-4" /> Enable HTTPS
+							<div class="flex items-center gap-2 px-3 py-2">
+								<Input
+									bind:value={newDomain}
+									placeholder="app.example.com"
+									class="h-8 flex-1 border-0 bg-transparent! font-mono text-xs shadow-none focus-visible:ring-0"
+									onkeydown={(e) => e.key === 'Enter' && newDomain.trim() && modDomain('add', newDomain.trim())}
+								/>
+								<Button
+									variant="ghost"
+									size="sm"
+									disabled={!newDomain.trim()}
+									onclick={() => modDomain('add', newDomain.trim())}
+								>
+									<PlusIcon class="size-4" /> Add domain
 								</Button>
-							{/if}
+							</div>
 						</div>
+						{#if d.domains.length && !d.ssl}
+							<Button size="sm" class="mt-3" onclick={() => (sslOpen = true)}>
+								<LockIcon class="size-4" /> Enable HTTPS
+							</Button>
+						{/if}
 					</Card.Content>
 				</Card.Root>
 
