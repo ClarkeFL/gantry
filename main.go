@@ -47,6 +47,7 @@ func main() {
 		"POST /api/logout":               handleLogout,
 		"GET /api/me":                    handleMe,
 		"POST /api/update":               handleUpdate,
+		"GET /api/update/check":          handleUpdateCheck,
 		"GET /api/apps":                  handleApps,
 		"GET /api/apps/{name}":           handleAppDetail,
 		"POST /api/apps/{name}/env":      handleEnv,

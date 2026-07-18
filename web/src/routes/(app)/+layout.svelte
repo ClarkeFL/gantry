@@ -15,6 +15,8 @@
 	let version = $state('');
 	let mock = $state(false);
 	let updating = $state(false);
+	let latest = $state('');
+	let updateAvailable = $state(false);
 
 	const nav = [
 		{ href: '/', label: 'Apps', icon: LayoutGridIcon },
@@ -27,6 +29,9 @@
 			version = me.version;
 			mock = me.mock;
 			ready = true;
+			const check = await api('/update/check');
+			latest = check.latest;
+			updateAvailable = check.available;
 		} catch {
 			// api() redirects to /login on 401
 		}
@@ -38,7 +43,7 @@
 	}
 
 	async function update() {
-		if (!confirm('Download the latest version and restart the panel?')) return;
+		if (!confirm(`Download ${latest || 'the latest version'} and restart the panel?`)) return;
 		updating = true;
 		try {
 			await api('/update', { method: 'POST' });
@@ -78,10 +83,26 @@
 				{/each}
 			</nav>
 			<div class="mt-auto grid gap-1 p-2">
-				<Button variant="ghost" size="sm" class="justify-start gap-2" onclick={update} disabled={updating}>
-					<DownloadIcon class="size-4" />
-					{updating ? 'Updating…' : 'Update panel'}
-				</Button>
+				{#if updateAvailable}
+					<Button
+						variant="ghost"
+						size="sm"
+						class="justify-start gap-2 text-amber-500 hover:text-amber-400"
+						onclick={update}
+						disabled={updating}
+					>
+						<span class="relative flex size-4 items-center justify-center">
+							<DownloadIcon class="size-4" />
+							<span class="absolute -top-0.5 -right-0.5 size-2 animate-pulse rounded-full bg-amber-500"></span>
+						</span>
+						{updating ? 'Updating…' : `Update to ${latest}`}
+					</Button>
+				{:else}
+					<Button variant="ghost" size="sm" class="justify-start gap-2" onclick={update} disabled={updating}>
+						<DownloadIcon class="size-4" />
+						{updating ? 'Updating…' : 'Update panel'}
+					</Button>
+				{/if}
 				<Button variant="ghost" size="sm" class="justify-start gap-2" onclick={logout}>
 					<LogOutIcon class="size-4" /> Log out
 				</Button>

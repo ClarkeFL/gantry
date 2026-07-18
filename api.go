@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -299,7 +300,55 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 
 // --- self-update: download latest release binary, swap self, exit; systemd restarts us ---
 
+var updateCache struct {
+	sync.Mutex
+	latest string
+	at     time.Time
+}
+
+func latestVersion() string {
+	repo := env("GANTRY_REPO", "")
+	if repo == "" {
+		return ""
+	}
+	updateCache.Lock()
+	defer updateCache.Unlock()
+	if time.Since(updateCache.at) < time.Hour {
+		return updateCache.latest
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get("https://api.github.com/repos/" + repo + "/releases/latest")
+	if err != nil {
+		return updateCache.latest
+	}
+	defer resp.Body.Close()
+	var rel struct {
+		TagName string `json:"tag_name"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&rel) == nil && rel.TagName != "" {
+		updateCache.latest, updateCache.at = rel.TagName, time.Now()
+	}
+	return updateCache.latest
+}
+
+func handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if mockMode {
+		writeJSON(w, map[string]any{"current": version, "latest": "v9.9.9", "available": true})
+		return
+	}
+	latest := latestVersion()
+	writeJSON(w, map[string]any{
+		"current":   version,
+		"latest":    latest,
+		"available": latest != "" && latest != version,
+	})
+}
+
 func handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if mockMode { // let UI dev exercise the flow without swapping the dev binary
+		writeJSON(w, map[string]any{"ok": true, "restarting": true})
+		return
+	}
 	repo := env("GANTRY_REPO", "")
 	if repo == "" {
 		httpErr(w, 400, "GANTRY_REPO not set (e.g. youruser/gantry)")
