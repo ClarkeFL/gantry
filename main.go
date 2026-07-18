@@ -60,6 +60,7 @@ func main() {
 		"GET /api/settings":               handleSettingsGet,
 		"POST /api/settings/github":       handleGitHubSet,
 		"POST /api/settings/letsencrypt":  handleLEEmail,
+		"POST /api/settings/registry":     handleRegistryAdd,
 		"POST /api/apps/{name}/domains":   handleDomainsMod,
 		"PUT /api/apps/{name}/source":     handleSourceSet,
 		"POST /api/apps/{name}/ssl":       handleSSL,

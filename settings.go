@@ -12,11 +12,17 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 )
 
+type registryCred struct {
+	Server string `json:"server"`
+	User   string `json:"user"`
+}
+
 type panelSettings struct {
-	GitHubUser  string   `json:"github_user,omitempty"`
-	GitHubToken string   `json:"github_token,omitempty"`
-	LEEmail     string   `json:"letsencrypt_email,omitempty"`
-	Categories  []string `json:"categories,omitempty"`
+	GitHubUser  string         `json:"github_user,omitempty"`
+	GitHubToken string         `json:"github_token,omitempty"`
+	LEEmail     string         `json:"letsencrypt_email,omitempty"`
+	Categories  []string       `json:"categories,omitempty"`
+	Registries  []registryCred `json:"registries,omitempty"` // display only — docker stores the creds
 }
 
 var (
@@ -59,11 +65,13 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 	}
 	settingsMu.Lock()
 	leEmail := settings.LEEmail
+	registries := append([]registryCred{}, settings.Registries...)
 	settingsMu.Unlock()
 	out := map[string]any{
 		"githubUser":  user,
 		"githubToken": masked,
 		"leEmail":     leEmail,
+		"registries":  registries,
 		"email":       auth.Email,
 		"totpEnabled": auth.TOTPSecret != "",
 		"totpPending": auth.PendingTOTP != "",
@@ -122,6 +130,48 @@ func handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleRegistryAdd logs the server's docker into a registry for private image pulls.
+func handleRegistryAdd(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Server, User, Password string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	req.Server = strings.TrimSpace(req.Server)
+	if req.Server == "" {
+		req.Server = "docker.io"
+	}
+	req.User = strings.TrimSpace(req.User)
+	if req.User == "" || req.Password == "" {
+		httpErr(w, 400, "username and password are required")
+		return
+	}
+	if out, err := dokku("registry:login", req.Server, req.User, req.Password); err != nil {
+		httpErr(w, 401, "registry login failed: "+out)
+		return
+	}
+	settingsMu.Lock()
+	found := false
+	for i, c := range settings.Registries {
+		if c.Server == req.Server {
+			settings.Registries[i].User = req.User
+			found = true
+			break
+		}
+	}
+	if !found {
+		settings.Registries = append(settings.Registries, registryCred{req.Server, req.User})
+	}
+	err := saveSettings()
+	registries := append([]registryCred{}, settings.Registries...)
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "registries": registries})
 }
 
 func handleCategoryCreate(w http.ResponseWriter, r *http.Request) {
