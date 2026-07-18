@@ -8,6 +8,13 @@ DOKKU_TAG="${DOKKU_TAG:-v0.35.20}"
 
 [ "$(id -u)" = 0 ] || { echo "run as root (sudo)"; exit 1; }
 
+# 0. base system: refresh package lists, apply pending updates, ensure tools
+echo "==> updating system packages..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get -qq update
+apt-get -y -qq upgrade
+apt-get -y -qq install curl wget ca-certificates
+
 # 1. dokku (skipped if already installed)
 if ! command -v dokku >/dev/null 2>&1; then
   echo "==> installing dokku $DOKKU_TAG (this takes a few minutes)..."
@@ -54,7 +61,15 @@ EOF
 systemctl daemon-reload
 systemctl enable --now gantry
 
+IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo ""
-echo "==> gantry is running on http://$(hostname -I 2>/dev/null | awk '{print $1}'):8022"
-echo "    tip: put it behind https, e.g. deploy nothing and just:"
-echo "    dokku domains + letsencrypt on a proxy app, or a Cloudflare tunnel."
+echo "================================================="
+echo "  gantry is installed and running"
+echo ""
+echo "  panel:    http://$IP:8022"
+echo "  service:  systemctl status gantry"
+echo "  logs:     journalctl -u gantry -f"
+echo ""
+echo "  log in with the password and 2FA code from"
+echo "  the 'gantry init' step above."
+echo "================================================="
