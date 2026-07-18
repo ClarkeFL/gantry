@@ -25,7 +25,15 @@ mv /usr/local/bin/gantry.new /usr/local/bin/gantry
 
 # 3. first-run setup (password + 2FA secret) — interactive, skipped if done before
 mkdir -p /var/lib/gantry
-[ -f /var/lib/gantry/auth.json ] || gantry init
+if [ ! -f /var/lib/gantry/auth.json ]; then
+  if [ -t 0 ]; then
+    gantry init
+  elif [ -c /dev/tty ]; then
+    gantry init < /dev/tty   # curl|sh: stdin is the script, prompt on the tty instead
+  else
+    echo "!! no tty — run 'gantry init' then 'systemctl restart gantry' to finish setup"
+  fi
+fi
 
 # 4. systemd service — auto-start on boot, auto-restart (also how self-update applies)
 cat > /etc/systemd/system/gantry.service <<EOF
