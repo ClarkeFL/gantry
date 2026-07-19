@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 )
@@ -55,6 +56,11 @@ func ensureStorageDir(slug string) (string, error) {
 		if strings.HasPrefix(f, "/") && strings.HasSuffix(f, slug) {
 			hostDir = f
 		}
+	}
+	// dokku chowns to the herokuish uid, but Dockerfile images run as whatever
+	// user they declare, so open the directory up or the app can't write to it
+	if !mockMode {
+		os.Chmod(hostDir, 0o777)
 	}
 	return hostDir, nil
 }
