@@ -101,7 +101,9 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	envVars := map[string]string{}
 	json.Unmarshal([]byte(envJSON), &envVars)
 	domainsOut, _ := dokku("domains:report", name, "--domains-app-vhosts")
-	_, sslErr := dokku("letsencrypt:active", name)
+	// letsencrypt:active prints true/false and exits 0 either way
+	sslOut, sslErr := dokku("letsencrypt:active", name)
+	sslOn := sslErr == nil && strings.TrimSpace(sslOut) == "true"
 	nativeCron, _ := dokku("cron:list", name)
 	type domainInfo struct {
 		Name  string `json:"name"`
@@ -144,7 +146,7 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 		"category":       category,
 		"env":            envVars,
 		"domains":        domains,
-		"ssl":            sslErr == nil,
+		"ssl":            sslOn,
 		"leEmailSet":     func() bool { settingsMu.Lock(); defer settingsMu.Unlock(); return settings.LEEmail != "" }(),
 		"jobs":           jobs,
 		"nativeCron":     nativeCron,
@@ -1118,7 +1120,14 @@ func handleSSL(w http.ResponseWriter, r *http.Request) {
 		send("[gantry] done")
 		return
 	}
-	streamCmd(r.Context(), send, "dokku", "letsencrypt:enable", name)
+	if out, err := dokku("letsencrypt:set", name, "email", email); err != nil {
+		send("[error] could not set the certificate email: " + out)
+		return
+	}
+	if err := streamCmd(r.Context(), send, "dokku", "letsencrypt:enable", name); err != nil {
+		send("[error] certificate request failed, see the output above")
+		return
+	}
 	dokku("letsencrypt:cron-job", "--add") // idempotent auto-renew
 	send("[gantry] done")
 }
