@@ -25,11 +25,12 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import LockIcon from '@lucide/svelte/icons/lock';
 	import WrenchIcon from '@lucide/svelte/icons/wrench';
+	import CloudIcon from '@lucide/svelte/icons/cloud';
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 
 	type Job = { id: string; schedule: string; command: string; disabled?: boolean; last?: string };
-	type Domain = { name: string; dnsOk: boolean };
+	type Domain = { name: string; dnsOk: boolean; proxied?: boolean };
 	type Detail = {
 		name: string;
 		running: boolean;
@@ -556,6 +557,14 @@
 								<div class="bg-muted/30 flex items-center gap-1 px-3 py-2">
 									<span class="text-muted-foreground font-mono text-xs">{d.ssl ? 'https://' : 'http://'}</span>
 									<span class="flex-1 truncate font-mono text-xs">{domain.name}</span>
+									{#if domain.proxied}
+										<span
+											class="text-muted-foreground flex items-center gap-1 text-xs"
+											title="This domain runs through Cloudflare's proxy. Traffic reaches this server via Cloudflare, so the panel can't compare IPs directly."
+										>
+											<CloudIcon class="size-3.5" /> via Cloudflare
+										</span>
+									{/if}
 									{#if d.ssl && domain.dnsOk}
 										<LockIcon class="size-3.5 text-emerald-500" />
 									{:else if !domain.dnsOk}

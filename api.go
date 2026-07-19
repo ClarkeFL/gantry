@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -106,8 +107,9 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	sslOn := sslErr == nil && strings.TrimSpace(sslOut) == "true"
 	nativeCron, _ := dokku("cron:list", name)
 	type domainInfo struct {
-		Name  string `json:"name"`
-		DNSOK bool   `json:"dnsOk"`
+		Name    string `json:"name"`
+		DNSOK   bool   `json:"dnsOk"`
+		Proxied bool   `json:"proxied,omitempty"`
 	}
 	domains := []domainInfo{}
 	myIP := ""
@@ -115,9 +117,10 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 		myIP = serverIP()
 	}
 	for _, dom := range strings.Fields(domainsOut) {
-		ok := false
+		ok, proxied := false, false
 		if mockMode {
 			ok = dom != "www.example.com" // one waiting row for UI dev
+			proxied = strings.HasPrefix(dom, "blog.")
 		} else if ips, err := lookupTimeout(dom); err == nil {
 			for _, ip := range ips {
 				if ip == myIP {
@@ -125,8 +128,11 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
+			if !ok && behindProxy(ips) {
+				ok, proxied = true, true // traffic reaches us through the proxy
+			}
 		}
-		domains = append(domains, domainInfo{dom, ok})
+		domains = append(domains, domainInfo{dom, ok, proxied})
 	}
 	metaMu.Lock()
 	m := getMeta(name)
@@ -1073,9 +1079,46 @@ func handleDomainsMod(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
+			if !dnsOk && behindProxy(ips) {
+				dnsOk = true
+			}
 		}
 	}
 	writeJSON(w, map[string]any{"ok": true, "dnsOk": dnsOk})
+}
+
+// Cloudflare's published proxy ranges (cloudflare.com/ips, stable for years).
+// A proxied domain resolves to these instead of the server IP, so the plain
+// "does it point at us" check would wait forever.
+var cloudflareNets = func() []netip.Prefix {
+	cidrs := []string{
+		"173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+		"141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+		"197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+		"104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+	}
+	out := make([]netip.Prefix, 0, len(cidrs))
+	for _, c := range cidrs {
+		if p, err := netip.ParsePrefix(c); err == nil {
+			out = append(out, p)
+		}
+	}
+	return out
+}()
+
+func behindProxy(ips []string) bool {
+	for _, s := range ips {
+		a, err := netip.ParseAddr(s)
+		if err != nil {
+			continue
+		}
+		for _, p := range cloudflareNets {
+			if p.Contains(a) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func lookupTimeout(host string) ([]string, error) {
