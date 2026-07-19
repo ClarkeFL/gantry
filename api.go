@@ -1256,10 +1256,16 @@ func sseStart(w http.ResponseWriter) (func(string), bool) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 	return func(line string) {
-		fmt.Fprintf(w, "data: %s\n\n", line)
+		fmt.Fprintf(w, "data: %s\n\n", stripANSI(line))
 		fl.Flush()
 	}, true
 }
+
+// stripANSI drops terminal color and cursor codes from dokku/docker output,
+// which would otherwise show as garbage like "[36m" in the browser.
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]|\r`)
+
+func stripANSI(s string) string { return ansiRe.ReplaceAllString(s, "") }
 
 func handleLogs(w http.ResponseWriter, r *http.Request) {
 	name, ok := appName(w, r)
@@ -1318,7 +1324,7 @@ func handleDeployLog(w http.ResponseWriter, r *http.Request) {
 		b = []byte("No deploys yet.")
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write(b)
+	w.Write([]byte(stripANSI(string(b)))) // logs written before stripping existed
 }
 
 func handleDeploy(w http.ResponseWriter, r *http.Request) {
@@ -1345,7 +1351,7 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(f, "=== deploy started %s\n", time.Now().Format(time.RFC3339))
 		sse := send
 		send = func(line string) {
-			fmt.Fprintln(f, line)
+			fmt.Fprintln(f, stripANSI(line))
 			sse(line)
 		}
 	}
