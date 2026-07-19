@@ -31,6 +31,7 @@ const histCap = 120 // 10 minutes at 5s
 
 var (
 	statsMu   sync.Mutex
+	statsApps []appStat
 	statsHist []statPoint
 	statsCur  struct {
 		CPU                            float64
@@ -46,6 +47,17 @@ func startStatsSampler() {
 	if mockMode {
 		seedMockStats()
 	}
+	// docker stats takes ~2s to sample, far too slow to run per request, so a
+	// second loop refreshes a cache every 10s and handleStats reads that.
+	go func() {
+		for {
+			apps := containerStats()
+			statsMu.Lock()
+			statsApps = apps
+			statsMu.Unlock()
+			time.Sleep(10 * time.Second)
+		}
+	}()
 	go func() {
 		var lastIdle, lastTotal, lastRx, lastTx uint64
 		lastIdle, lastTotal = readCPU()
@@ -100,14 +112,15 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 	statsMu.Lock()
 	cur := statsCur
 	hist := append([]statPoint{}, statsHist...)
+	apps := append([]appStat{}, statsApps...)
 	statsMu.Unlock()
 	writeJSON(w, map[string]any{
-		"cpu":   map[string]any{"pct": cur.CPU, "cores": cur.Cores, "load": cur.Load},
-		"mem":   map[string]uint64{"used": cur.MemUsed, "total": cur.MemTotal},
-		"disk":  map[string]uint64{"used": cur.DiskUsed, "total": cur.DiskTotal},
-		"net":   cur.Net,
-		"hist":  hist,
-		"apps":  containerStats(),
+		"cpu":  map[string]any{"pct": cur.CPU, "cores": cur.Cores, "load": cur.Load},
+		"mem":  map[string]uint64{"used": cur.MemUsed, "total": cur.MemTotal},
+		"disk": map[string]uint64{"used": cur.DiskUsed, "total": cur.DiskTotal},
+		"net":  cur.Net,
+		"hist": hist,
+		"apps": apps,
 	})
 }
 

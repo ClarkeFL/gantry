@@ -54,19 +54,33 @@ func handleApps(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	apps := []appInfo{}
 	maint := maintenanceAll()
-	metaMu.Lock()
+	names := []string{}
 	for _, name := range strings.Split(out, "\n") {
 		name = strings.TrimSpace(name)
-		if !appRe.MatchString(name) {
-			continue // headers and "! You haven't deployed any applications yet"
+		if appRe.MatchString(name) { // skips headers and "! You haven't deployed any applications yet"
+			names = append(names, name)
 		}
-		running, _ := dokku("ps:report", name, "--running")
-		m := getMeta(name)
-		apps = append(apps, appInfo{name, running == "true", m.Category, m.LastDeploy, m.LastDeployOK, maint[name]})
 	}
-	metaMu.Unlock()
+	// one ps:report shell-out per app; run them concurrently or the list
+	// grows ~250ms slower per app
+	apps := make([]appInfo, len(names))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for i, name := range names {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			running, _ := dokku("ps:report", name, "--running")
+			metaMu.Lock()
+			m := getMeta(name)
+			apps[i] = appInfo{name, running == "true", m.Category, m.LastDeploy, m.LastDeployOK, maint[name]}
+			metaMu.Unlock()
+		}(i, name)
+	}
+	wg.Wait()
 	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
 	catSet := map[string]bool{}
 	cats := []string{}
@@ -1386,7 +1400,10 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		out, err := exec.CommandContext(ctx, "git", checkArgs...).CombinedOutput()
 		cancel()
 		if err != nil {
-			detail := strings.TrimSpace(strings.ReplaceAll(string(out), tok, "•••"))
+			detail := strings.TrimSpace(string(out))
+			if tok != "" {
+				detail = strings.ReplaceAll(detail, tok, "•••")
+			}
 			if req.Ref != "" && strings.Contains(err.Error(), "exit status 2") {
 				detail = "branch or tag '" + req.Ref + "' not found in the repository"
 			}
