@@ -471,7 +471,7 @@ func handleInstallPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	send("-----> Installing dokku " + req.Type + " plugin...")
-	if err := streamCmd(r.Context(), send, "dokku", "plugin:install", url, req.Type); err != nil {
+	if err := streamCmd(context.Background(), send, "dokku", "plugin:install", url, req.Type); err != nil {
 		send("[gantry] error: " + err.Error())
 		return
 	}
@@ -920,7 +920,7 @@ func handleServiceBackup(w http.ResponseWriter, r *http.Request) {
 		send("[error] backup-auth failed: " + out)
 		return
 	}
-	if err := streamCmd(r.Context(), send, "dokku", req.Type+":backup", req.Name, bucket); err != nil {
+	if err := streamCmd(context.Background(), send, "dokku", req.Type+":backup", req.Name, bucket); err != nil {
 		send("[error] backup failed (" + err.Error() + "), see output above")
 		go notifyWebhook("gantry: backup failed for " + req.Type + "/" + req.Name)
 		return
@@ -1074,7 +1074,7 @@ func handleCreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// first create on a plugin pulls its image, stream so the UI shows progress
-	streamCmd(r.Context(), send, "dokku", req.Type+":create", req.Name)
+	streamCmd(context.Background(), send, "dokku", req.Type+":create", req.Name)
 	send("[gantry] done")
 }
 
@@ -1212,7 +1212,7 @@ func handleSSL(w http.ResponseWriter, r *http.Request) {
 		send("[error] could not set the certificate email: " + out)
 		return
 	}
-	if err := streamCmd(r.Context(), send, "dokku", "letsencrypt:enable", name); err != nil {
+	if err := streamCmd(context.Background(), send, "dokku", "letsencrypt:enable", name); err != nil {
 		send("[error] certificate request failed, see the output above")
 		return
 	}
@@ -1442,7 +1442,7 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		if req.Ref != "" {
 			checkArgs = append(checkArgs, req.Ref)
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		out, err := exec.CommandContext(ctx, "git", checkArgs...).CombinedOutput()
 		cancel()
 		if err != nil {
@@ -1461,10 +1461,10 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		if req.Ref != "" {
 			args = append(args, req.Ref)
 		}
-		runErr = streamCmd(r.Context(), send, "dokku", args...)
+		runErr = streamCmd(context.Background(), send, "dokku", args...)
 	case req.Image != "":
 		send("[check] verifying image exists…")
-		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		out, err := exec.CommandContext(ctx, "docker", "manifest", "inspect", req.Image).CombinedOutput()
 		cancel()
 		if err != nil {
@@ -1472,9 +1472,9 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		send("[check] image found")
-		runErr = streamCmd(r.Context(), send, "dokku", "git:from-image", name, req.Image)
+		runErr = streamCmd(context.Background(), send, "dokku", "git:from-image", name, req.Image)
 	default:
-		runErr = streamCmd(r.Context(), send, "dokku", "ps:rebuild", name)
+		runErr = streamCmd(context.Background(), send, "dokku", "ps:rebuild", name)
 	}
 	if runErr != nil {
 		finish(false, "deploy exited with an error ("+runErr.Error()+"), see the output above")

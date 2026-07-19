@@ -29,6 +29,10 @@
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
 	import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
+	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import XIcon from '@lucide/svelte/icons/x';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { askConfirm } from '$lib/confirm.svelte';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 
@@ -106,15 +110,20 @@
 
 	// logs
 	let logLines = $state<string[]>([]);
-	let logKind = $state('runtime');
-	let deployLog = $state('');
 	let logEl = $state<HTMLElement | null>(null);
 	let stopLogs: (() => void) | null = null;
 
-	// deploy
-	let deployOpen = $state(false);
+	// live deploy (shown as a card on the Deploys tab — no modal)
+	type LiveDeploy = {
+		started: string;
+		source: string;
+		status: 'running' | 'success' | 'failed';
+		lines: string[];
+	};
+	let liveDeploy = $state<LiveDeploy | null>(null);
 	let deploying = $state(false);
-	let deployLines = $state<string[]>([]);
+	let deployLogOpen = $state(true);
+	let deployLogEl = $state<HTMLElement | null>(null);
 	let stopDeploy: (() => void) | null = null;
 
 	// source config
@@ -202,6 +211,11 @@
 	$effect(() => {
 		if (logLines.length && logEl) logEl.scrollTop = logEl.scrollHeight;
 	});
+	$effect(() => {
+		if (liveDeploy?.lines.length && deployLogEl) {
+			deployLogEl.scrollTop = deployLogEl.scrollHeight;
+		}
+	});
 	async function loadDeploys() {
 		deploysLoading = true;
 		try {
@@ -227,13 +241,6 @@
 	$effect(() => {
 		if (tab === 'deploys') loadDeploys();
 	});
-	$effect(() => {
-		if (tab === 'logs' && logKind === 'deploy') {
-			fetch(`/api/apps/${name}/logs/deploy`)
-				.then((r) => r.text())
-				.then((t) => (deployLog = t));
-		}
-	});
 
 	async function ps(action: 'restart' | 'stop' | 'start') {
 		try {
@@ -246,25 +253,44 @@
 	}
 
 	function startDeploy() {
+		if (deploying) return;
 		if (srcType === 'none' && !d?.running) {
 			tab = 'source';
 			toast.info('Set a deploy source first');
 			return;
 		}
-		deployOpen = true;
+		tab = 'deploys';
+		loadDeploys();
 		deploying = true;
-		deployLines = [];
+		deployLogOpen = true;
+		liveDeploy = {
+			started: new Date().toISOString(),
+			source: sourceSummary,
+			status: 'running',
+			lines: []
+		};
 		// empty body → the server deploys from the saved source, with pre-flight checks
 		stopDeploy = stream(
 			`/apps/${name}/deploy`,
 			(l) => {
-				deployLines.push(l);
+				if (!liveDeploy) return;
+				liveDeploy.lines.push(l);
+				if (l.includes('[gantry] done')) liveDeploy.status = 'success';
+				else if (l.includes('[gantry] aborted') || l.startsWith('[error]')) liveDeploy.status = 'failed';
 			},
 			{ method: 'POST', body: '{}' },
 			() => {
 				deploying = false;
+				if (liveDeploy && liveDeploy.status === 'running') {
+					// stream ended without a terminal marker
+					const failed = liveDeploy.lines.some((l) => l.startsWith('[error]') || l.includes('aborted'));
+					liveDeploy.status = failed ? 'failed' : 'success';
+				}
+				const ok = liveDeploy?.status === 'success';
+				if (ok) toast.success('Deploy finished');
+				else toast.error('Deploy failed');
 				load();
-				if (tab === 'deploys') loadDeploys();
+				loadDeploys();
 			}
 		);
 	}
@@ -520,8 +546,12 @@
 						<PlayIcon class="size-4" /> Start
 					</Button>
 				{/if}
-				<Button size="sm" onclick={startDeploy}>
-					<RocketIcon class="size-4" /> Deploy
+				<Button size="sm" onclick={startDeploy} disabled={deploying}>
+					{#if deploying}
+						<LoaderCircleIcon class="size-4 animate-spin" /> Deploying…
+					{:else}
+						<RocketIcon class="size-4" /> Deploy
+					{/if}
 				</Button>
 			</div>
 		</div>
@@ -604,8 +634,12 @@
 						<div class="flex gap-2">
 							<Button variant="outline" onclick={() => saveSource(false)} disabled={savingSrc}>Save</Button>
 							{#if srcType !== 'none'}
-								<Button onclick={() => saveSource(true)} disabled={savingSrc}>
-									<RocketIcon class="size-4" /> Save & deploy
+								<Button onclick={() => saveSource(true)} disabled={savingSrc || deploying}>
+									{#if deploying}
+										<LoaderCircleIcon class="size-4 animate-spin" /> Deploying…
+									{:else}
+										<RocketIcon class="size-4" /> Save & deploy
+									{/if}
 								</Button>
 							{/if}
 						</div>
@@ -613,7 +647,99 @@
 				</Card.Root>
 			</Tabs.Content>
 
-			<Tabs.Content value="deploys" class="mt-4">
+			<Tabs.Content value="deploys" class="mt-4 grid gap-4">
+				{#if liveDeploy}
+					<div
+						class="animate-in fade-in slide-in-from-top-2 overflow-hidden rounded-xl border duration-300
+							{liveDeploy.status === 'running'
+							? 'border-amber-500/40 bg-amber-500/5 shadow-[0_0_0_1px_rgba(245,158,11,0.08)]'
+							: liveDeploy.status === 'success'
+								? 'border-emerald-500/40 bg-emerald-500/5'
+								: 'border-red-500/40 bg-red-500/5'}"
+					>
+						{#if liveDeploy.status === 'running'}
+							<div class="h-0.5 w-full overflow-hidden bg-amber-500/15">
+								<div class="bg-amber-500 h-full w-1/3 animate-[deploy-slide_1.4s_ease-in-out_infinite]"></div>
+							</div>
+						{/if}
+						<div class="flex items-start gap-3 p-4">
+							<div
+								class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full
+									{liveDeploy.status === 'running'
+									? 'bg-amber-500/15 text-amber-500'
+									: liveDeploy.status === 'success'
+										? 'bg-emerald-500/15 text-emerald-500'
+										: 'bg-red-500/15 text-red-500'}"
+							>
+								{#if liveDeploy.status === 'running'}
+									<LoaderCircleIcon class="size-4 animate-spin" />
+								{:else if liveDeploy.status === 'success'}
+									<CheckIcon class="size-4" />
+								{:else}
+									<XIcon class="size-4" />
+								{/if}
+							</div>
+							<div class="min-w-0 flex-1">
+								<div class="flex flex-wrap items-center gap-2">
+									<span class="text-sm font-medium">
+										{#if liveDeploy.status === 'running'}
+											Deploying…
+										{:else if liveDeploy.status === 'success'}
+											Deploy succeeded
+										{:else}
+											Deploy failed
+										{/if}
+									</span>
+									{#if liveDeploy.status === 'running'}
+										<Badge class="border-transparent bg-amber-500/15 text-amber-500">building</Badge>
+									{:else if liveDeploy.status === 'success'}
+										<Badge class="border-transparent bg-emerald-500/15 text-emerald-500">success</Badge>
+									{:else}
+										<Badge variant="destructive">failed</Badge>
+									{/if}
+									<span class="text-muted-foreground text-xs" title={fmtDate(liveDeploy.started)}
+										>{ago(liveDeploy.started)}</span
+									>
+								</div>
+								<div class="text-muted-foreground mt-0.5 truncate font-mono text-xs">{liveDeploy.source}</div>
+							</div>
+							<Button
+								variant="ghost"
+								size="sm"
+								class="shrink-0"
+								onclick={() => (deployLogOpen = !deployLogOpen)}
+							>
+								<ChevronDownIcon
+									class="size-4 transition-transform duration-200 {deployLogOpen ? 'rotate-180' : ''}"
+								/>
+								{deployLogOpen ? 'Hide log' : 'Show log'}
+							</Button>
+						</div>
+						{#if deployLogOpen}
+							<div
+								bind:this={deployLogEl}
+								class="border-border/60 bg-card/60 max-h-72 overflow-y-auto border-t p-3 font-mono text-xs leading-5"
+							>
+								{#each liveDeploy.lines as line, i (i)}
+									<div
+										class="whitespace-pre-wrap {line.startsWith('[error]') || line.includes('aborted')
+											? 'text-red-400'
+											: line.includes('[gantry] done')
+												? 'text-emerald-400'
+												: line.startsWith('[check]') || line.startsWith('[gantry]')
+													? 'text-amber-400/90'
+													: ''}"
+									>
+										{line}
+									</div>
+								{:else}
+									<p class="text-muted-foreground animate-pulse">Starting deploy…</p>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
+
 				<Card.Root>
 					<Card.Header>
 						<Card.Title class="text-base">Deploy history</Card.Title>
@@ -624,7 +750,10 @@
 					</Card.Header>
 					<Card.Content class="grid gap-3">
 						{#each deploys as e (e.id)}
-							<div class="flex items-center gap-3 rounded-lg border p-3">
+							<div
+								class="flex items-center gap-3 rounded-lg border p-3 transition-colors
+									{e.status === 'running' ? 'border-amber-500/30 bg-amber-500/5' : ''}"
+							>
 								<span
 									class="size-2 shrink-0 rounded-full {e.status === 'success'
 										? 'bg-emerald-500'
@@ -652,7 +781,11 @@
 							</div>
 						{:else}
 							<p class="text-muted-foreground text-sm">
-								{deploysLoading ? 'Loading…' : 'No deploys yet. Hit the Deploy button and it will show up here.'}
+								{deploysLoading
+									? 'Loading…'
+									: liveDeploy
+										? 'History will update when this deploy finishes.'
+										: 'No deploys yet. Hit the Deploy button and it will show up here.'}
 							</p>
 						{/each}
 					</Card.Content>
@@ -1055,28 +1188,16 @@
 			</Tabs.Content>
 
 			<Tabs.Content value="logs" class="mt-4">
-				<Tabs.Root bind:value={logKind}>
-					<Tabs.List>
-						<Tabs.Trigger value="runtime">Runtime</Tabs.Trigger>
-						<Tabs.Trigger value="deploy">Last deploy</Tabs.Trigger>
-					</Tabs.List>
-				</Tabs.Root>
-				{#if logKind === 'runtime'}
-					<div
-						bind:this={logEl}
-						class="bg-card mt-3 h-[32rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5"
-					>
-						{#each logLines as line, i (i)}
-							<div class="whitespace-pre-wrap">{line}</div>
-						{:else}
-							<p class="text-muted-foreground">Waiting for logs…</p>
-						{/each}
-					</div>
-				{:else}
-					<div class="bg-card mt-3 h-[32rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5">
-						<pre class="whitespace-pre-wrap">{deployLog || 'Loading…'}</pre>
-					</div>
-				{/if}
+				<div
+					bind:this={logEl}
+					class="bg-card h-[32rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5"
+				>
+					{#each logLines as line, i (i)}
+						<div class="whitespace-pre-wrap">{line}</div>
+					{:else}
+						<p class="text-muted-foreground">Waiting for logs…</p>
+					{/each}
+				</div>
 			</Tabs.Content>
 		</Tabs.Root>
 	{/if}
@@ -1098,24 +1219,6 @@
 		{#if sslLines.length}
 			<div class="bg-card mt-2 max-h-64 overflow-y-auto rounded-md border p-3 font-mono text-xs leading-5">
 				{#each sslLines as line, i (i)}<div class="whitespace-pre-wrap">{line}</div>{/each}
-			</div>
-		{/if}
-	</Dialog.Content>
-</Dialog.Root>
-
-<Dialog.Root bind:open={deployOpen}>
-	<Dialog.Content class="max-w-2xl">
-		<Dialog.Header>
-			<Dialog.Title>{deploying ? 'Deploying' : 'Deployed'} {name}</Dialog.Title>
-			<Dialog.Description>
-				Source: <code class="text-foreground">{sourceSummary}</code>, change it on the Source tab.
-			</Dialog.Description>
-		</Dialog.Header>
-		{#if deployLines.length}
-			<div class="bg-card mt-2 h-64 overflow-y-auto rounded-md border p-3 font-mono text-xs leading-5">
-				{#each deployLines as line, i (i)}
-					<div class="whitespace-pre-wrap">{line}</div>
-				{/each}
 			</div>
 		{/if}
 	</Dialog.Content>
