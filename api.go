@@ -1344,7 +1344,40 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		finish(false, "deploy exited with an error ("+runErr.Error()+"), see the output above")
 		return
 	}
+	if fixed := ensurePort80(name); fixed != "" {
+		send("[gantry] mapped port 80 to the app's port " + fixed + " so it serves on the normal web port")
+	}
 	finish(true, "")
+}
+
+// ensurePort80 maps http:80 to the app's container port. When a Dockerfile
+// EXPOSEs a port, dokku publishes e.g. 3000:3000 and the site only answers on
+// :3000; visitors expect port 80. Returns the container port when it remapped.
+func ensurePort80(app string) string {
+	out, err := dokku("ports:report", app, "--ports-map")
+	if err != nil {
+		return ""
+	}
+	container := ""
+	for _, f := range strings.Fields(out) {
+		p := strings.Split(f, ":")
+		if len(p) != 3 {
+			continue
+		}
+		if p[1] == "80" || p[1] == "443" {
+			return "" // already mapped to a real web port
+		}
+		if container == "" {
+			container = p[2]
+		}
+	}
+	if container == "" {
+		return ""
+	}
+	if _, err := dokku("ports:set", app, "http:80:"+container); err != nil {
+		return ""
+	}
+	return container
 }
 
 // --- self-update: download latest release binary, swap self, exit; systemd restarts us ---
