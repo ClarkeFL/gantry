@@ -656,7 +656,33 @@ func handleBackupArchiveApps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"apps": names})
 }
 
+// --- busy tracking: the panel refuses to self-update while a long-running
+// operation (deploy, backup, restore, certificate request) is in flight,
+// because restarting would kill it mid-way. ---
+
+var (
+	busyOps     sync.Map // id -> label
+	busyCounter int64
+	busyMu      sync.Mutex
+)
+
+func opStart(label string) func() {
+	busyMu.Lock()
+	busyCounter++
+	id := busyCounter
+	busyMu.Unlock()
+	busyOps.Store(id, label)
+	return func() { busyOps.Delete(id) }
+}
+
+func busyWith() string {
+	label := ""
+	busyOps.Range(func(_, v any) bool { label = v.(string); return false })
+	return label
+}
+
 func handleAppRestore(w http.ResponseWriter, r *http.Request) {
+	defer opStart("app restore")()
 	name, ok := appName(w, r)
 	if !ok {
 		return
@@ -783,6 +809,7 @@ func handleBackups(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleServerBackup(w http.ResponseWriter, r *http.Request) {
+	defer opStart("server backup")()
 	send, ok := sseStart(w)
 	if !ok {
 		return
@@ -849,6 +876,7 @@ func handleServerBackupSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleServiceBackup(w http.ResponseWriter, r *http.Request) {
+	defer opStart("database backup")()
 	var req struct{ Type, Name string }
 	json.NewDecoder(r.Body).Decode(&req)
 	if !serviceTypes[req.Type] || !appRe.MatchString(req.Name) {
@@ -1138,6 +1166,7 @@ func serverIP() string {
 
 // handleSSL streams `dokku letsencrypt:enable <app>` and registers the renewal cron.
 func handleSSL(w http.ResponseWriter, r *http.Request) {
+	defer opStart("certificate request")()
 	name, ok := appName(w, r)
 	if !ok {
 		return
@@ -1261,6 +1290,7 @@ func handleDeployLog(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDeploy(w http.ResponseWriter, r *http.Request) {
+	defer opStart("deploy")()
 	name, ok := appName(w, r)
 	if !ok {
 		return
@@ -1507,6 +1537,10 @@ func verParts(v string) ([3]int, bool) {
 }
 
 func handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if label := busyWith(); label != "" {
+		httpErr(w, 409, "a "+label+" is running right now; updating would interrupt it. Try again when it finishes.")
+		return
+	}
 	if mockMode { // let UI dev exercise the flow without swapping the dev binary
 		writeJSON(w, map[string]any{"ok": true, "restarting": true})
 		return

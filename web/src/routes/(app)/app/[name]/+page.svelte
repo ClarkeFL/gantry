@@ -57,8 +57,12 @@
 	let d = $state<Detail | null>(null);
 	let tab = $state(page.url.searchParams.get('tab') ?? 'overview');
 
-	// env editor
+	// env editor. Dokku's own bookkeeping vars (DOKKU_*, GIT_REV) are shown
+	// read-only and excluded from the editable rows AND the unset diff, so a
+	// save can never delete them and break the app.
+	const isSysEnv = (k: string) => k.startsWith('DOKKU_') || k === 'GIT_REV';
 	let rows = $state<{ key: string; value: string }[]>([]);
+	let sysEnv = $state<[string, string][]>([]);
 	let origEnv: Record<string, string> = {};
 	let restartAfterSave = $state(true);
 	let savingEnv = $state(false);
@@ -130,8 +134,10 @@
 
 	async function load() {
 		d = await api<Detail>('/apps/' + name);
-		rows = Object.entries(d.env).map(([key, value]) => ({ key, value }));
-		origEnv = { ...d.env };
+		const entries = Object.entries(d.env);
+		sysEnv = entries.filter(([k]) => isSysEnv(k)).sort((a, b) => a[0].localeCompare(b[0]));
+		rows = entries.filter(([k]) => !isSysEnv(k)).map(([key, value]) => ({ key, value }));
+		origEnv = Object.fromEntries(entries.filter(([k]) => !isSysEnv(k)));
 		jobs = d.jobs.map((j) => ({ ...j }));
 		category = d.category;
 		srcRepo = d.repo ?? '';
@@ -786,6 +792,25 @@
 								{savingEnv ? 'Saving…' : 'Save changes'}
 							</Button>
 						</div>
+						{#if sysEnv.length}
+							<details class="mt-3">
+								<summary class="text-muted-foreground cursor-pointer text-xs">
+									System variables ({sysEnv.length}), managed by the deploy system
+								</summary>
+								<div class="bg-muted/30 mt-2 grid gap-1 rounded-md border p-3">
+									{#each sysEnv as [k, v] (k)}
+										<div class="text-muted-foreground flex gap-3 font-mono text-xs">
+											<span class="w-52 shrink-0">{k}</span>
+											<span class="truncate">{v}</span>
+										</div>
+									{/each}
+									<p class="text-muted-foreground mt-1 text-xs font-sans">
+										Set automatically by dokku (build type, ports, deployed commit). Read-only
+										here, changing them by hand can break the app.
+									</p>
+								</div>
+							</details>
+						{/if}
 					</Card.Content>
 				</Card.Root>
 			</Tabs.Content>
