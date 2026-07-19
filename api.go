@@ -179,6 +179,7 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 		"lastDeployOk":   lastDeployOK,
 		"maintenance":    maintenanceAll()[name],
 		"maintenanceTpl": maintTpl,
+		"mounts":         listMounts(name),
 	})
 }
 

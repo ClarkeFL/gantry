@@ -101,6 +101,7 @@ var (
 	mockLinks       = map[string][]string{"postgres/main-db": {"api"}} // "type/name" -> apps
 	mockSchedules   = map[string]string{}                             // "type/name" -> cron
 	mockMaintenance = map[string]bool{}                               // app -> maintenance on
+	mockMounts      = map[string][]string{}                           // app -> "host:container"
 	// which dokku service plugins are "installed" in mock (postgres+redis match seed data)
 	mockPlugins = map[string]bool{
 		"postgres": true,
@@ -152,13 +153,14 @@ type mockState struct {
 	Schedules   map[string]string            `json:"schedules"`
 	Maintenance map[string]bool              `json:"maintenance"`
 	Plugins     map[string]bool              `json:"plugins"`
+	Mounts      map[string][]string          `json:"mounts"`
 }
 
 func mockStatePath() string { return filepath.Join(dataDir, "mockstate.json") }
 
 // saveMockState is called with mockMu held.
 func saveMockState() {
-	b, _ := json.Marshal(mockState{mockEnv, mockRunning, mockSSL, mockDomains, mockServices, mockLinks, mockSchedules, mockMaintenance, mockPlugins})
+	b, _ := json.Marshal(mockState{mockEnv, mockRunning, mockSSL, mockDomains, mockServices, mockLinks, mockSchedules, mockMaintenance, mockPlugins, mockMounts})
 	os.WriteFile(mockStatePath(), b, 0o644)
 }
 
@@ -180,6 +182,9 @@ func loadMockState() {
 	}
 	if s.Maintenance != nil {
 		mockMaintenance = s.Maintenance
+	}
+	if s.Mounts != nil {
+		mockMounts = s.Mounts
 	}
 	if s.Plugins != nil {
 		// merge so new types default in if we add them later
@@ -239,7 +244,24 @@ func mockDokku(args []string) (string, error) {
 		delete(mockDomains, app)
 		delete(mockSSL, app)
 		delete(mockMaintenance, app)
+		delete(mockMounts, app)
 		return "-----> Destroyed " + app, nil
+	case verb == "storage:list":
+		return strings.Join(mockMounts[app], "\n"), nil
+	case verb == "storage:ensure-directory":
+		return "/var/lib/dokku/data/storage/" + args[len(args)-1], nil
+	case verb == "storage:mount":
+		mockMounts[args[1]] = append(mockMounts[args[1]], args[2])
+		return "-----> Mounted", nil
+	case verb == "storage:unmount":
+		kept := []string{}
+		for _, m := range mockMounts[args[1]] {
+			if m != args[2] {
+				kept = append(kept, m)
+			}
+		}
+		mockMounts[args[1]] = kept
+		return "-----> Unmounted", nil
 	case verb == "maintenance:on", verb == "maintenance:off":
 		mockMaintenance[app] = verb == "maintenance:on"
 		return "-----> OK", nil

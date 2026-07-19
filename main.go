@@ -105,6 +105,7 @@ func main() {
 		"PUT /api/apps/{name}/source":     handleSourceSet,
 		"POST /api/apps/{name}/ssl":         handleSSL,
 		"POST /api/apps/{name}/maintenance": handleMaintenance,
+		"POST /api/apps/{name}/storage":     handleStorageMod,
 		"GET /api/maintenance/preview":      handleMaintenancePreview,
 		"POST /api/settings/password":     handleChangePassword,
 		"POST /api/settings/totp/setup":   handleTOTPSetup,

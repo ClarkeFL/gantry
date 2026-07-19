@@ -27,6 +27,8 @@
 	import WrenchIcon from '@lucide/svelte/icons/wrench';
 	import CloudIcon from '@lucide/svelte/icons/cloud';
 	import UploadIcon from '@lucide/svelte/icons/upload';
+	import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
+	import { askConfirm } from '$lib/confirm.svelte';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 
 	type Job = { id: string; schedule: string; command: string; disabled?: boolean; last?: string };
@@ -50,6 +52,7 @@
 		lastDeployOk: boolean;
 		maintenance: boolean;
 		maintenanceTpl: string;
+		mounts: { hostDir: string; containerPath: string }[];
 	};
 
 	const name = $derived(page.params.name!);
@@ -87,6 +90,10 @@
 	];
 	let maintTpl = $state('clean');
 	let maintBusy = $state(false);
+
+	// persistent storage
+	let newMount = $state('');
+	let mountBusy = $state(false);
 
 	// logs
 	let logLines = $state<string[]>([]);
@@ -403,6 +410,32 @@
 		}
 	}
 
+	async function modMount(path: string, remove: boolean) {
+		if (remove) {
+			const ok = await askConfirm(
+				`Detach ${path}? The folder and everything in it stays on the server, it just stops being connected to the app. Attaching the same path again brings the data back.`
+			);
+			if (!ok) return;
+		}
+		mountBusy = true;
+		try {
+			const res = await api<{ restarted: boolean }>(`/apps/${name}/storage`, {
+				method: 'POST',
+				body: JSON.stringify({ path, remove })
+			});
+			toast.success(
+				(remove ? 'Folder detached' : 'Folder attached') +
+					(res.restarted ? ', app restarted to apply it' : ', applies on the next start')
+			);
+			newMount = '';
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			mountBusy = false;
+		}
+	}
+
 	async function destroyApp() {
 		destroying = true;
 		try {
@@ -698,6 +731,62 @@
 								/>
 							</div>
 						</div>
+					</Card.Content>
+				</Card.Root>
+
+				<Card.Root>
+					<Card.Header>
+						<Card.Title class="flex items-center gap-2 text-base">
+							<HardDriveIcon class="size-4" /> Persistent storage
+						</Card.Title>
+						<Card.Description>
+							Apps lose their files on every deploy and restart. Attach a folder here and anything the
+							app saves in it (uploads, a SQLite file, generated images) survives. Gantry stores it
+							safely on the server for you.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content>
+						<div class="divide-border overflow-hidden rounded-lg border divide-y">
+							{#each d.mounts as m (m.containerPath)}
+								<div class="bg-muted/30 flex items-center gap-2 px-3 py-2">
+									<HardDriveIcon class="text-muted-foreground size-3.5 shrink-0" />
+									<span class="truncate font-mono text-xs">{m.containerPath}</span>
+									<span class="text-muted-foreground ml-auto hidden truncate font-mono text-xs sm:block" title="Where the files live on the server">
+										{m.hostDir}
+									</span>
+									<button
+										class="text-muted-foreground hover:text-destructive p-1.5"
+										onclick={() => modMount(m.containerPath, true)}
+										disabled={mountBusy}
+										aria-label="Detach {m.containerPath}"
+									>
+										<Trash2Icon class="size-4" />
+									</button>
+								</div>
+							{:else}
+								<p class="text-muted-foreground px-3 py-2 text-sm">No folders attached.</p>
+							{/each}
+							<div class="flex items-center gap-2 px-3 py-2">
+								<Input
+									bind:value={newMount}
+									placeholder="/data/uploads"
+									class="h-8 flex-1 border-0 bg-transparent! font-mono text-xs shadow-none focus-visible:ring-0"
+									onkeydown={(e) => e.key === 'Enter' && newMount.trim() && modMount(newMount.trim(), false)}
+								/>
+								<Button
+									variant="ghost"
+									size="sm"
+									disabled={!newMount.trim() || mountBusy}
+									onclick={() => modMount(newMount.trim(), false)}
+								>
+									<PlusIcon class="size-4" /> Attach folder
+								</Button>
+							</div>
+						</div>
+						<p class="text-muted-foreground mt-2 text-xs">
+							Enter the folder path as your app sees it inside its container. Attaching or detaching
+							restarts the app so the change takes effect.
+						</p>
 					</Card.Content>
 				</Card.Root>
 

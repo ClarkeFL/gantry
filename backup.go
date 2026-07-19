@@ -24,6 +24,7 @@ type appBackup struct {
 	Name    string            `json:"name"`
 	Env     map[string]string `json:"env"`
 	Domains []string          `json:"domains"`
+	Mounts  []string          `json:"mounts,omitempty"` // container paths; host dirs are derived
 }
 
 func backupLogPath() string { return filepath.Join(dataDir, "backuplog") }
@@ -95,6 +96,9 @@ func buildBackupArchive() ([]byte, error) {
 			}
 			if doms, err := dokku("domains:report", name, "--domains-app-vhosts"); err == nil {
 				a.Domains = strings.Fields(doms)
+			}
+			for _, m := range listMounts(name) {
+				a.Mounts = append(a.Mounts, m.ContainerPath)
 			}
 			apps = append(apps, a)
 		}
@@ -224,6 +228,12 @@ func restoreBackup(path string) error {
 		}
 		for _, d := range a.Domains {
 			dokku("domains:add", a.Name, d)
+		}
+		// recreate mount definitions (the data inside them is not in this archive)
+		for _, p := range a.Mounts {
+			if hostDir, err := ensureStorageDir(storageSlug(a.Name, p)); err == nil {
+				dokku("storage:mount", a.Name, hostDir+":"+p)
+			}
 		}
 	}
 	fmt.Printf("\nrestore complete: %d apps defined. Restart the panel (systemctl restart gantry),\n", len(apps))
