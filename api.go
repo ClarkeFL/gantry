@@ -443,7 +443,87 @@ func handleBackups(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, row{s.Type, s.Name, sched})
 	}
 	bucket, _, s3ok := s3Config()
-	writeJSON(w, map[string]any{"databases": rows, "s3Set": s3ok, "bucket": bucket})
+	serverSched := ""
+	if b, err := os.ReadFile(filepath.Join(cronDir, "gantry-backup")); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			f := strings.Fields(line)
+			if len(f) >= 5 && !strings.HasPrefix(f[0], "#") && !strings.HasPrefix(f[0], "SHELL") && !strings.HasPrefix(f[0], "PATH") {
+				serverSched = strings.Join(f[:5], " ")
+				break
+			}
+		}
+	}
+	writeJSON(w, map[string]any{
+		"databases":      rows,
+		"s3Set":          s3ok,
+		"bucket":         bucket,
+		"serverSchedule": serverSched,
+		"serverKeep":     backupKeep(),
+		"lastBackup":     lastServerBackup(),
+	})
+}
+
+func handleServerBackup(w http.ResponseWriter, r *http.Request) {
+	send, ok := sseStart(w)
+	if !ok {
+		return
+	}
+	if _, _, s3ok := s3Config(); !s3ok {
+		send("[error] configure S3 storage first")
+		return
+	}
+	if mockMode {
+		for _, l := range []string{"[backup] collecting panel state and app definitions…", "[backup] uploading 42 KB to s3://mock-bucket/gantry/panel-mock.tar.gz", "[backup] done — gantry/panel-mock.tar.gz"} {
+			send(l)
+			time.Sleep(300 * time.Millisecond)
+		}
+		logBackup("ok gantry/panel-mock.tar.gz (42 KB, keep " + fmt.Sprint(backupKeep()) + ")")
+		send("[gantry] done")
+		return
+	}
+	if err := runServerBackup(send); err != nil {
+		send("[error] " + err.Error())
+		return
+	}
+	send("[gantry] done")
+}
+
+func handleServerBackupSchedule(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Schedule string
+		Keep     int
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	req.Schedule = strings.TrimSpace(req.Schedule)
+	if req.Schedule != "" && (!validSchedule(req.Schedule) || strings.HasPrefix(req.Schedule, "@")) {
+		httpErr(w, 400, "schedule must be 5 cron fields, e.g. 0 4 * * *")
+		return
+	}
+	if req.Keep < 1 || req.Keep > 100 {
+		req.Keep = 7
+	}
+	settingsMu.Lock()
+	settings.BackupKeep = req.Keep
+	saveSettings()
+	settingsMu.Unlock()
+	path := filepath.Join(cronDir, "gantry-backup")
+	if req.Schedule == "" {
+		os.Remove(path)
+		writeJSON(w, map[string]any{"ok": true})
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		exe = "/usr/local/bin/gantry"
+	}
+	content := "# managed by gantry — scheduled full server backup\n" +
+		req.Schedule + " root " + exe + " backup >/dev/null 2>&1\n"
+	os.MkdirAll(cronDir, 0o755)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 func handleServiceBackup(w http.ResponseWriter, r *http.Request) {

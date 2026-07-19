@@ -44,6 +44,7 @@ type panelSettings struct {
 	S3Endpoint string `json:"s3_endpoint,omitempty"` // blank = AWS
 
 	AlertWebhook string `json:"alert_webhook,omitempty"` // Slack/Discord-compatible
+	BackupKeep   int    `json:"backup_keep,omitempty"`   // server backups to retain, 0 = default 7
 }
 
 type apiToken struct {

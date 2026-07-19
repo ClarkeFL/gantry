@@ -35,6 +35,23 @@ func main() {
 		case "version":
 			fmt.Println(version)
 			return
+		case "backup":
+			loadSettings()
+			if err := runServerBackup(func(l string) { fmt.Println(l) }); err != nil {
+				fmt.Fprintln(os.Stderr, "backup failed:", err)
+				os.Exit(1)
+			}
+			return
+		case "restore":
+			if len(os.Args) < 3 {
+				fmt.Fprintln(os.Stderr, "usage: gantry restore <backup.tar.gz>")
+				os.Exit(1)
+			}
+			if err := restoreBackup(os.Args[2]); err != nil {
+				fmt.Fprintln(os.Stderr, "restore failed:", err)
+				os.Exit(1)
+			}
+			return
 		}
 	}
 	if err := loadAuth(); err != nil {
@@ -104,6 +121,8 @@ func main() {
 		"GET /api/backups":                   handleBackups,
 		"POST /api/services/backup":          handleServiceBackup,
 		"POST /api/services/backup/schedule": handleBackupSchedule,
+		"POST /api/backup/server":            handleServerBackup,
+		"POST /api/backup/server/schedule":   handleServerBackupSchedule,
 		"POST /api/settings/s3":              handleS3Set,
 		"POST /api/settings/webhook":         handleWebhookSet,
 		"GET /api/audit":                     handleAudit,

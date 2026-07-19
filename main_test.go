@@ -44,3 +44,40 @@ func TestCronFile(t *testing.T) {
 		t.Error("validSchedule misbehaving")
 	}
 }
+
+func TestBackupRestoreRoundtrip(t *testing.T) {
+	src := t.TempDir()
+	dataDir, cronDir = src, filepath.Join(src, "cron.d")
+	os.MkdirAll(filepath.Join(src, "cronlog"), 0o755)
+	os.MkdirAll(cronDir, 0o755)
+	os.WriteFile(filepath.Join(src, "meta.json"), []byte(`{"api":{"repo":"https://github.com/x/y"}}`), 0o644)
+	os.WriteFile(filepath.Join(src, "cronlog", "api-1.log"), []byte("2026-01-01 exit=0\n"), 0o644)
+	os.WriteFile(filepath.Join(cronDir, "gantry-api"), []byte("* * * * * root echo hi\n"), 0o644)
+	os.WriteFile(filepath.Join(src, "backuplog"), []byte("should not be archived\n"), 0o644)
+
+	archive, err := buildBackupArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := filepath.Join(t.TempDir(), "b.tar.gz")
+	os.WriteFile(tmp, archive, 0o644)
+
+	dst := t.TempDir()
+	dataDir, cronDir = dst, filepath.Join(dst, "cron.d")
+	if err := restoreBackup(tmp); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dst, "meta.json"))
+	if err != nil || !strings.Contains(string(b), "github.com/x/y") {
+		t.Fatalf("meta.json not restored: %v %q", err, b)
+	}
+	if _, err := os.ReadFile(filepath.Join(dst, "cronlog", "api-1.log")); err != nil {
+		t.Fatal("nested cronlog file not restored")
+	}
+	if _, err := os.ReadFile(filepath.Join(dst, "cron.d", "gantry-api")); err != nil {
+		t.Fatal("cron file not restored")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "backuplog")); err == nil {
+		t.Fatal("backuplog should be excluded from archives")
+	}
+}

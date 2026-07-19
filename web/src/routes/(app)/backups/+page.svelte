@@ -29,6 +29,51 @@
 	// per-row schedule edits
 	let schedules = $state<Record<string, string>>({});
 
+	// server backup
+	let serverSchedule = $state('');
+	let serverKeep = $state(7);
+	let lastBackup = $state('');
+	let savingServer = $state(false);
+
+	async function saveServerSchedule(e: SubmitEvent) {
+		e.preventDefault();
+		savingServer = true;
+		try {
+			await api('/backup/server/schedule', {
+				method: 'POST',
+				body: JSON.stringify({ schedule: serverSchedule.trim(), keep: serverKeep })
+			});
+			toast.success(
+				serverSchedule.trim()
+					? `Server backup scheduled: ${serverSchedule.trim()}, keeping last ${serverKeep}`
+					: 'Server backup schedule removed'
+			);
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			savingServer = false;
+		}
+	}
+
+	function serverBackupNow() {
+		backupTarget = 'server';
+		backupLines = [];
+		backupOpen = true;
+		backingUp = true;
+		stream(
+			'/backup/server',
+			(l) => {
+				backupLines.push(l);
+			},
+			{ method: 'POST' },
+			async () => {
+				backingUp = false;
+				await load();
+			}
+		);
+	}
+
 	// backup-now dialog
 	let backupOpen = $state(false);
 	let backupTarget = $state('');
@@ -46,6 +91,9 @@
 			dbs = d.databases ?? [];
 			s3Set = d.s3Set;
 			bucket = d.bucket ?? '';
+			serverSchedule = d.serverSchedule ?? '';
+			serverKeep = d.serverKeep ?? 7;
+			lastBackup = d.lastBackup ?? '';
 			for (const db of dbs) schedules[db.type + '/' + db.name] = db.schedule;
 			const s = await api('/settings');
 			s3Bucket = s.s3.bucket ?? '';
@@ -159,6 +207,40 @@
 				</div>
 				<Button type="submit" class="w-fit" disabled={savingS3}>{savingS3 ? 'Saving…' : 'Save'}</Button>
 			</form>
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="text-base">Server backup</Card.Title>
+			<Card.Description>
+				One archive of everything that defines this server: panel settings, app sources, env vars,
+				domains, cron jobs and categories. Restore onto a fresh install with
+				<code>gantry restore &lt;file&gt;</code>. Old backups beyond the keep count are deleted
+				automatically.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content class="grid gap-3">
+			<form onsubmit={saveServerSchedule} class="flex flex-wrap items-end gap-2">
+				<div class="grid gap-1">
+					<Label for="srv-sched">Schedule <span class="text-muted-foreground">(blank = off)</span></Label>
+					<Input id="srv-sched" bind:value={serverSchedule} placeholder="0 4 * * *" class="w-32 font-mono text-xs" />
+				</div>
+				<div class="grid gap-1">
+					<Label for="srv-keep">Keep last</Label>
+					<Input id="srv-keep" type="number" min={1} max={100} bind:value={serverKeep} class="w-20" />
+				</div>
+				<Button type="submit" variant="outline" disabled={savingServer || !s3Set}>Save</Button>
+				<Button type="button" onclick={serverBackupNow} disabled={!s3Set}>
+					<CloudUploadIcon class="size-4" /> Backup now
+				</Button>
+			</form>
+			{#if lastBackup}
+				<p class="text-muted-foreground font-mono text-xs">last: {lastBackup}</p>
+			{/if}
+			{#if !s3Set}
+				<p class="text-muted-foreground text-sm">Configure S3 storage above first.</p>
+			{/if}
 		</Card.Content>
 	</Card.Root>
 
