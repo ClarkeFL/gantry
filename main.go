@@ -119,6 +119,7 @@ func main() {
 		"POST /api/apps/{name}/ps":       handlePs,
 		"GET /api/apps/{name}/logs":        handleLogs,
 		"GET /api/apps/{name}/logs/deploy": handleDeployLog,
+		"GET /api/apps/{name}/deploys":     handleDeploys,
 		"POST /api/apps/{name}/deploy":   handleDeploy,
 		"PUT /api/apps/{name}/cron":      handleCronPut,
 		"POST /api/services/link":            handleServiceLink,

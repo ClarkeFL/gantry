@@ -992,6 +992,7 @@ func handleAppDestroy(w http.ResponseWriter, r *http.Request) {
 	}
 	writeCronFile(name, nil) // removes /etc/cron.d/gantry-<name>
 	os.Remove(deployLogPath(name))
+	os.RemoveAll(deployDir(name))
 	metaMu.Lock()
 	delete(meta, name)
 	saveMeta()
@@ -1296,7 +1297,23 @@ func handleDeployLog(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	b, err := os.ReadFile(deployLogPath(name))
+	id := r.URL.Query().Get("id")
+	if id != "" && !deployIDRe.MatchString(id) {
+		httpErr(w, 400, "bad deploy id")
+		return
+	}
+	if id == "" {
+		if ids := deployIDs(name); len(ids) > 0 {
+			id = ids[0]
+		}
+	}
+	var b []byte
+	var err error
+	if id != "" {
+		b, err = os.ReadFile(filepath.Join(deployDir(name), id+".log"))
+	} else {
+		b, err = os.ReadFile(deployLogPath(name)) // pre-history single-file layout
+	}
 	if err != nil {
 		b = []byte("No deploys yet.")
 	}
@@ -1317,9 +1334,13 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// tee every line into the per-app deploy log (fresh file per deploy)
-	os.MkdirAll(filepath.Join(dataDir, "deploylog"), 0o755)
-	if f, err := os.Create(deployLogPath(name)); err == nil {
+	// tee every line into this deploy's own log file (kept as history)
+	os.MkdirAll(deployDir(name), 0o755)
+	pruneDeployLogs(name)
+	deployID := time.Now().UTC().Format("20060102-150405")
+	var logF *os.File
+	if f, err := os.Create(filepath.Join(deployDir(name), deployID+".log")); err == nil {
+		logF = f
 		defer f.Close()
 		fmt.Fprintf(f, "=== deploy started %s\n", time.Now().Format(time.RFC3339))
 		sse := send
@@ -1342,12 +1363,30 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		req.Repo, req.Ref, req.Dockerfile, req.Image = m.Repo, m.Ref, m.Dockerfile, m.Image
 		metaMu.Unlock()
 	}
+	// the source is known now that meta has been consulted; record it for history
+	if logF != nil {
+		src := "rebuild of last deployed code"
+		if req.Repo != "" {
+			src = req.Repo
+			if req.Ref != "" {
+				src += " @ " + req.Ref
+			}
+		} else if req.Image != "" {
+			src = req.Image
+		}
+		fmt.Fprintf(logF, "=== source %s\n", src)
+	}
 	finish := func(ok bool, detail string) {
 		metaMu.Lock()
 		m := getMeta(name)
 		m.LastDeploy, m.LastDeployOK = time.Now().Format(time.RFC3339), ok
 		saveMeta()
 		metaMu.Unlock()
+		defer func() {
+			if logF != nil {
+				fmt.Fprintf(logF, "=== deploy finished %s %s\n", map[bool]string{true: "ok", false: "failed"}[ok], time.Now().Format(time.RFC3339))
+			}
+		}()
 		if ok {
 			send("[gantry] done")
 			return

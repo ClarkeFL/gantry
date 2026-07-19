@@ -28,6 +28,7 @@
 	import CloudIcon from '@lucide/svelte/icons/cloud';
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
+	import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
 	import { askConfirm } from '$lib/confirm.svelte';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 
@@ -94,6 +95,14 @@
 	// persistent storage
 	let newMount = $state('');
 	let mountBusy = $state(false);
+
+	// deploy history
+	type DeployEntry = { id: string; started: string; finished?: string; source?: string; status: string };
+	let deploys = $state<DeployEntry[]>([]);
+	let deploysLoading = $state(false);
+	let histLogOpen = $state(false);
+	let histLogText = $state('');
+	let histLog = $state<DeployEntry | null>(null);
 
 	// logs
 	let logLines = $state<string[]>([]);
@@ -193,6 +202,31 @@
 	$effect(() => {
 		if (logLines.length && logEl) logEl.scrollTop = logEl.scrollHeight;
 	});
+	async function loadDeploys() {
+		deploysLoading = true;
+		try {
+			deploys = await api<DeployEntry[]>(`/apps/${name}/deploys`);
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			deploysLoading = false;
+		}
+	}
+	async function viewDeployLog(e: DeployEntry) {
+		histLog = e;
+		histLogText = '';
+		histLogOpen = true;
+		histLogText = await fetch(`/api/apps/${name}/logs/deploy?id=${e.id}`).then((r) => r.text());
+	}
+	function deployDuration(e: DeployEntry): string {
+		if (!e.finished || !e.started) return '';
+		const s = (new Date(e.finished).getTime() - new Date(e.started).getTime()) / 1000;
+		if (isNaN(s) || s < 0) return '';
+		return s >= 60 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${Math.round(s)}s`;
+	}
+	$effect(() => {
+		if (tab === 'deploys') loadDeploys();
+	});
 	$effect(() => {
 		if (tab === 'logs' && logKind === 'deploy') {
 			fetch(`/api/apps/${name}/logs/deploy`)
@@ -230,6 +264,7 @@
 			() => {
 				deploying = false;
 				load();
+				if (tab === 'deploys') loadDeploys();
 			}
 		);
 	}
@@ -495,6 +530,7 @@
 			<Tabs.List>
 				<Tabs.Trigger value="overview">Overview</Tabs.Trigger>
 				<Tabs.Trigger value="source">Source</Tabs.Trigger>
+				<Tabs.Trigger value="deploys">Deploys</Tabs.Trigger>
 				<Tabs.Trigger value="env">Environment</Tabs.Trigger>
 				<Tabs.Trigger value="cron">Cron</Tabs.Trigger>
 				<Tabs.Trigger value="logs">Logs</Tabs.Trigger>
@@ -573,6 +609,52 @@
 								</Button>
 							{/if}
 						</div>
+					</Card.Content>
+				</Card.Root>
+			</Tabs.Content>
+
+			<Tabs.Content value="deploys" class="mt-4">
+				<Card.Root>
+					<Card.Header>
+						<Card.Title class="text-base">Deploy history</Card.Title>
+						<Card.Description>
+							Every deploy of this app, newest first. Open the log to see exactly what happened
+							during the build. The last 20 deploys are kept.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="grid gap-3">
+						{#each deploys as e (e.id)}
+							<div class="flex items-center gap-3 rounded-lg border p-3">
+								<span
+									class="size-2 shrink-0 rounded-full {e.status === 'success'
+										? 'bg-emerald-500'
+										: e.status === 'running'
+											? 'animate-pulse bg-amber-500'
+											: 'bg-red-500'}"
+								></span>
+								<div class="min-w-0 flex-1">
+									<div class="flex items-center gap-2">
+										<span class="text-sm font-medium capitalize">{e.status}</span>
+										{#if deployDuration(e)}
+											<span class="text-muted-foreground text-xs">took {deployDuration(e)}</span>
+										{/if}
+									</div>
+									<div class="text-muted-foreground truncate font-mono text-xs">
+										{e.source || 'unknown source'}
+									</div>
+								</div>
+								{#if e.started}
+									<span class="text-muted-foreground shrink-0 text-xs" title={fmtDate(e.started)}>{ago(e.started)}</span>
+								{/if}
+								<Button variant="outline" size="sm" onclick={() => viewDeployLog(e)}>
+									<ScrollTextIcon class="size-4" /> Log
+								</Button>
+							</div>
+						{:else}
+							<p class="text-muted-foreground text-sm">
+								{deploysLoading ? 'Loading…' : 'No deploys yet. Hit the Deploy button and it will show up here.'}
+							</p>
+						{/each}
 					</Card.Content>
 				</Card.Root>
 			</Tabs.Content>
@@ -1036,5 +1118,21 @@
 				{/each}
 			</div>
 		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={histLogOpen}>
+	<Dialog.Content class="max-w-2xl">
+		<Dialog.Header>
+			<Dialog.Title>Deploy log</Dialog.Title>
+			<Dialog.Description>
+				{#if histLog}
+					{fmtDate(histLog.started)}{histLog.source ? ', ' + histLog.source : ''}
+				{/if}
+			</Dialog.Description>
+		</Dialog.Header>
+		<pre
+			class="bg-card mt-2 max-h-96 overflow-auto rounded-md border p-3 font-mono text-xs leading-5 whitespace-pre-wrap">{histLogText ||
+				'Loading…'}</pre>
 	</Dialog.Content>
 </Dialog.Root>
