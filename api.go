@@ -8,8 +8,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -138,22 +138,22 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 		jobs[i].Last = lastRun(name, jobs[i].ID)
 	}
 	writeJSON(w, map[string]any{
-		"name":       name,
-		"running":    running == "true",
-		"category":   category,
-		"env":        envVars,
-		"domains":    domains,
-		"ssl":        sslErr == nil,
-		"leEmailSet": func() bool { settingsMu.Lock(); defer settingsMu.Unlock(); return settings.LEEmail != "" }(),
-		"jobs":       jobs,
-		"nativeCron": nativeCron,
-		"repo":       repo,
-		"ref":        ref,
-		"buildDir":     buildDir,
-		"dockerfile":   dockerfile,
-		"image":        image,
-		"lastDeploy":   lastDeploy,
-		"lastDeployOk": lastDeployOK,
+		"name":           name,
+		"running":        running == "true",
+		"category":       category,
+		"env":            envVars,
+		"domains":        domains,
+		"ssl":            sslErr == nil,
+		"leEmailSet":     func() bool { settingsMu.Lock(); defer settingsMu.Unlock(); return settings.LEEmail != "" }(),
+		"jobs":           jobs,
+		"nativeCron":     nativeCron,
+		"repo":           repo,
+		"ref":            ref,
+		"buildDir":       buildDir,
+		"dockerfile":     dockerfile,
+		"image":          image,
+		"lastDeploy":     lastDeploy,
+		"lastDeployOk":   lastDeployOK,
 		"maintenance":    maintenanceAll()[name],
 		"maintenanceTpl": maintTpl,
 	})
@@ -371,7 +371,87 @@ func handleServicesGet(w http.ResponseWriter, r *http.Request) {
 	for i := range out {
 		out[i].Links = serviceLinks(out[i].Type, out[i].Name)
 	}
-	writeJSON(w, map[string]any{"services": out, "categories": cats})
+	writeJSON(w, map[string]any{
+		"services":   out,
+		"categories": cats,
+		"plugins":    installedServicePlugins(),
+	})
+}
+
+// Official dokku service plugins (name → git URL). Install is optional and
+// user-triggered from the Databases page so unused engines cost nothing.
+var servicePluginRepos = map[string]string{
+	"postgres": "https://github.com/dokku/dokku-postgres.git",
+	"mysql":    "https://github.com/dokku/dokku-mysql.git",
+	"mariadb":  "https://github.com/dokku/dokku-mariadb.git",
+	"redis":    "https://github.com/dokku/dokku-redis.git",
+	"mongo":    "https://github.com/dokku/dokku-mongo.git",
+}
+
+// servicePluginOrder is the stable UI order for type buttons.
+var servicePluginOrder = []string{"postgres", "mysql", "mariadb", "redis", "mongo"}
+
+func installedServicePlugins() map[string]bool {
+	out := make(map[string]bool, len(servicePluginOrder))
+	for _, t := range servicePluginOrder {
+		out[t] = servicePluginInstalled(t)
+	}
+	return out
+}
+
+func servicePluginInstalled(name string) bool {
+	if mockMode {
+		mockMu.Lock()
+		defer mockMu.Unlock()
+		if mockPlugins == nil {
+			return false
+		}
+		return mockPlugins[name]
+	}
+	_, err := dokku("plugin:installed", name)
+	return err == nil
+}
+
+// handleInstallPlugin streams `dokku plugin:install <url> <name>` so the UI
+// can show progress (first install downloads the plugin repo).
+func handleInstallPlugin(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Type string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	url, ok := servicePluginRepos[req.Type]
+	if !ok {
+		httpErr(w, 400, "unknown database type")
+		return
+	}
+	if servicePluginInstalled(req.Type) {
+		httpErr(w, 400, req.Type+" plugin is already installed")
+		return
+	}
+	send, ok := sseStart(w)
+	if !ok {
+		return
+	}
+	if mockMode {
+		send("-----> Installing " + req.Type + " plugin (mock)...")
+		mockMu.Lock()
+		if mockPlugins == nil {
+			mockPlugins = map[string]bool{}
+		}
+		mockPlugins[req.Type] = true
+		saveMockState()
+		mockMu.Unlock()
+		send("-----> Plugin " + req.Type + " installed")
+		send("[gantry] done")
+		return
+	}
+	send("-----> Installing dokku " + req.Type + " plugin...")
+	if err := streamCmd(r.Context(), send, "dokku", "plugin:install", url, req.Type); err != nil {
+		send("[gantry] error: " + err.Error())
+		return
+	}
+	send("[gantry] done")
 }
 
 func serviceLinks(t, n string) []string {
@@ -573,7 +653,7 @@ func handleAppRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Key string        `json:"key"`
+		Key string         `json:"key"`
 		Def *appRestoreDef `json:"def"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -639,37 +719,55 @@ func handleBackups(w http.ResponseWriter, r *http.Request) {
 		Type     string `json:"type"`
 		Name     string `json:"name"`
 		Schedule string `json:"schedule"`
+		Enabled  bool   `json:"enabled"`
 	}
+	settingsMu.Lock()
+	dbCron := map[string]string{}
+	for k, v := range settings.DBBackupCron {
+		dbCron[k] = v
+	}
+	srvCron, srvPaused := settings.ServerBackupCron, settings.ServerBackupPaused
+	settingsMu.Unlock()
 	rows := []row{}
 	for _, s := range listServices() {
-		sched := ""
+		// live dokku schedule is the source of truth for "enabled"
+		live := ""
 		if out, err := dokku(s.Type+":backup-schedule-cat", s.Name); err == nil {
 			for _, line := range strings.Split(out, "\n") {
 				f := strings.Fields(line)
 				if len(f) >= 5 && !strings.HasPrefix(f[0], "#") && !strings.HasPrefix(f[0], "=") {
-					sched = strings.Join(f[:5], " ")
+					live = strings.Join(f[:5], " ")
 					break
 				}
 			}
 		}
-		rows = append(rows, row{s.Type, s.Name, sched})
+		sched := live
+		if sched == "" {
+			sched = dbCron[s.Type+"/"+s.Name] // remembered while toggled off
+		}
+		rows = append(rows, row{s.Type, s.Name, sched, live != ""})
 	}
 	bucket, _, s3ok := s3Config()
-	serverSched := ""
+	serverSched := srvCron
+	live := ""
 	if b, err := os.ReadFile(filepath.Join(cronDir, "gantry-backup")); err == nil {
 		for _, line := range strings.Split(string(b), "\n") {
 			f := strings.Fields(line)
 			if len(f) >= 5 && !strings.HasPrefix(f[0], "#") && !strings.HasPrefix(f[0], "SHELL") && !strings.HasPrefix(f[0], "PATH") {
-				serverSched = strings.Join(f[:5], " ")
+				live = strings.Join(f[:5], " ")
 				break
 			}
 		}
+	}
+	if live != "" {
+		serverSched = live // pre-toggle installs: cron file exists, settings empty
 	}
 	writeJSON(w, map[string]any{
 		"databases":      rows,
 		"s3Set":          s3ok,
 		"bucket":         bucket,
 		"serverSchedule": serverSched,
+		"serverEnabled":  live != "" && !srvPaused,
 		"serverKeep":     backupKeep(),
 		"lastBackup":     lastServerBackup(),
 	})
@@ -704,6 +802,7 @@ func handleServerBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Schedule string
 		Keep     int
+		Enabled  bool
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	req.Schedule = strings.TrimSpace(req.Schedule)
@@ -716,10 +815,12 @@ func handleServerBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	settingsMu.Lock()
 	settings.BackupKeep = req.Keep
+	settings.ServerBackupCron = req.Schedule // remembered even while off
+	settings.ServerBackupPaused = !req.Enabled
 	saveSettings()
 	settingsMu.Unlock()
 	path := filepath.Join(cronDir, "gantry-backup")
-	if req.Schedule == "" {
+	if req.Schedule == "" || !req.Enabled {
 		os.Remove(path)
 		writeJSON(w, map[string]any{"ok": true})
 		return
@@ -776,18 +877,34 @@ func handleServiceBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleBackupSchedule(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Type, Name, Schedule string }
+	var req struct {
+		Type, Name, Schedule string
+		Enabled              bool
+	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if !serviceTypes[req.Type] || !appRe.MatchString(req.Name) {
 		httpErr(w, 400, "bad service type or name")
 		return
 	}
 	req.Schedule = strings.TrimSpace(req.Schedule)
-	if req.Schedule == "" {
-		if out, err := dokku(req.Type+":backup-unschedule", req.Name); err != nil {
+	key := req.Type + "/" + req.Name
+	remember := func() {
+		settingsMu.Lock()
+		if settings.DBBackupCron == nil {
+			settings.DBBackupCron = map[string]string{}
+		}
+		if req.Schedule != "" {
+			settings.DBBackupCron[key] = req.Schedule
+		}
+		saveSettings()
+		settingsMu.Unlock()
+	}
+	if req.Schedule == "" || !req.Enabled {
+		if out, err := dokku(req.Type+":backup-unschedule", req.Name); err != nil && !strings.Contains(strings.ToLower(out), "no schedule") {
 			httpErr(w, 500, out)
 			return
 		}
+		remember()
 		writeJSON(w, map[string]any{"ok": true})
 		return
 	}
@@ -808,6 +925,7 @@ func handleBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, out)
 		return
 	}
+	remember()
 	writeJSON(w, map[string]any{"ok": true})
 }
 
@@ -883,6 +1001,10 @@ func handleCreateService(w http.ResponseWriter, r *http.Request) {
 	}
 	if !serviceTypes[req.Type] || !appRe.MatchString(req.Name) {
 		httpErr(w, 400, "bad service type or name")
+		return
+	}
+	if !servicePluginInstalled(req.Type) {
+		httpErr(w, 400, req.Type+" plugin is not installed. Install it from the Databases page first.")
 		return
 	}
 	send, ok := sseStart(w)

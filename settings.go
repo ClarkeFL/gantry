@@ -44,7 +44,14 @@ type panelSettings struct {
 	S3Endpoint string `json:"s3_endpoint,omitempty"` // blank = AWS
 
 	AlertWebhook string `json:"alert_webhook,omitempty"` // Slack/Discord-compatible
+	AlertsPaused bool   `json:"alerts_paused,omitempty"` // toggle off without losing the URL
 	BackupKeep   int    `json:"backup_keep,omitempty"`   // server backups to retain, 0 = default 7
+
+	// Backup schedules remembered even while their toggle is off, so switching
+	// a schedule back on restores the previous settings.
+	ServerBackupCron   string            `json:"server_backup_cron,omitempty"`
+	ServerBackupPaused bool              `json:"server_backup_paused,omitempty"`
+	DBBackupCron       map[string]string `json:"db_backup_cron,omitempty"` // "type/name" -> cron
 
 	// IANA zone for schedule UI (e.g. "Australia/Sydney"). Empty = use browser timezone.
 	DisplayTZ string `json:"display_tz,omitempty"`
@@ -116,6 +123,7 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		"keySet":   settings.S3Key != "" && settings.S3Secret != "",
 	}
 	webhook := settings.AlertWebhook
+	alertsOn := settings.AlertWebhook != "" && !settings.AlertsPaused
 	displayTZ := settings.DisplayTZ
 	settingsMu.Unlock()
 	out := map[string]any{
@@ -126,8 +134,9 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		"sessionDays":  sessionDays,
 		"tokens":       tokens,
 		"s3":           s3,
-		"alertWebhook": webhook,
-		"displayTz":    displayTZ,
+		"alertWebhook":  webhook,
+		"alertsEnabled": alertsOn,
+		"displayTz":     displayTZ,
 		"email":        auth.Email,
 		"totpEnabled":  auth.TOTPSecret != "",
 		"totpPending":  auth.PendingTOTP != "",
@@ -219,10 +228,14 @@ func handleS3Set(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleWebhookSet(w http.ResponseWriter, r *http.Request) {
-	var req struct{ URL string }
+	var req struct {
+		URL     string
+		Enabled bool
+	}
 	json.NewDecoder(r.Body).Decode(&req)
 	settingsMu.Lock()
 	settings.AlertWebhook = strings.TrimSpace(req.URL)
+	settings.AlertsPaused = !req.Enabled
 	saveSettings()
 	settingsMu.Unlock()
 	writeJSON(w, map[string]any{"ok": true})
@@ -260,8 +273,9 @@ func handleDisplayTZSet(w http.ResponseWriter, r *http.Request) {
 func notifyWebhook(msg string) {
 	settingsMu.Lock()
 	url := settings.AlertWebhook
+	paused := settings.AlertsPaused
 	settingsMu.Unlock()
-	if url == "" {
+	if url == "" || paused {
 		return
 	}
 	b, _ := json.Marshal(map[string]string{"text": msg, "content": msg})

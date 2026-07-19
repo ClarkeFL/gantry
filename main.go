@@ -91,6 +91,7 @@ func main() {
 		"DELETE /api/apps/{name}":         handleAppDestroy,
 		"DELETE /api/services":            handleServiceDestroy,
 		"POST /api/services/category":     handleServiceCategorySet,
+		"POST /api/services/plugins":      handleInstallPlugin,
 		"POST /api/dbcategories":          handleDBCategoryCreate,
 		"DELETE /api/dbcategories":        handleDBCategoryDelete,
 		"GET /api/settings":               handleSettingsGet,

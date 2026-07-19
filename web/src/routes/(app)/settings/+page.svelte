@@ -6,6 +6,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import { Switch } from '$lib/components/ui/switch';
 	import * as Card from '$lib/components/ui/card';
 	import { fmtDate, fmtLogLine } from '$lib/dates';
 	import {
@@ -70,22 +71,31 @@
 
 	// alert webhook
 	let alertWebhook = $state('');
+	let alertsEnabled = $state(false);
 	let savingWebhook = $state(false);
 
 	// audit log
 	let auditLines = $state<string[]>([]);
 
-	async function saveWebhook(e: SubmitEvent) {
-		e.preventDefault();
+	async function saveWebhook(e?: SubmitEvent) {
+		e?.preventDefault();
 		savingWebhook = true;
 		try {
-			await api('/settings/webhook', { method: 'POST', body: JSON.stringify({ url: alertWebhook.trim() }) });
-			toast.success(alertWebhook.trim() ? 'Alerts on' : 'Alerts off');
+			await api('/settings/webhook', {
+				method: 'POST',
+				body: JSON.stringify({ url: alertWebhook.trim(), enabled: alertsEnabled })
+			});
+			toast.success(alertsEnabled && alertWebhook.trim() ? 'Alerts on' : 'Saved. Alerts are off');
 		} catch (e) {
 			toast.error(msg(e));
 		} finally {
 			savingWebhook = false;
 		}
+	}
+
+	function toggleAlerts(on: boolean) {
+		alertsEnabled = on;
+		saveWebhook();
 	}
 
 	async function loadAudit() {
@@ -165,6 +175,7 @@
 		tokens = s.tokens ?? [];
 		recoveryLeft = s.recoveryLeft ?? 0;
 		alertWebhook = s.alertWebhook ?? '';
+		alertsEnabled = s.alertsEnabled ?? false;
 		displayTz = s.displayTz ?? '';
 		displayPrefs.tz = displayTz;
 		loadAudit().catch(() => {});
@@ -501,10 +512,23 @@
 
 	<Card.Root>
 		<Card.Header>
-			<Card.Title class="text-base">Alerts</Card.Title>
+			<Card.Title class="flex items-center gap-2 text-base">
+				Alerts
+				<div class="ml-auto flex items-center gap-2">
+					<span class="text-xs {alertsEnabled ? 'text-emerald-500' : 'text-muted-foreground'}">
+						{alertsEnabled ? 'On' : 'Off'}
+					</span>
+					<Switch
+						checked={alertsEnabled}
+						onCheckedChange={toggleAlerts}
+						disabled={savingWebhook || !alertWebhook.trim()}
+						aria-label="Alerts on or off"
+					/>
+				</div>
+			</Card.Title>
 			<Card.Description>
-				A Slack or Discord webhook URL, gantry posts there when a deploy or backup fails. Blank
-				turns alerts off.
+				A Slack or Discord webhook URL, gantry posts there when a deploy or backup fails. The
+				switch turns alerts off without losing the URL.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>

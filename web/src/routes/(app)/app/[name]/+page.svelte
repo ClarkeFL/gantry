@@ -28,7 +28,7 @@
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 
-	type Job = { id: string; schedule: string; command: string; last?: string };
+	type Job = { id: string; schedule: string; command: string; disabled?: boolean; last?: string };
 	type Domain = { name: string; dnsOk: boolean };
 	type Detail = {
 		name: string;
@@ -355,7 +355,9 @@
 		try {
 			const res = await api<{ jobs: Job[] }>(`/apps/${name}/cron`, {
 				method: 'PUT',
-				body: JSON.stringify({ jobs: jobs.map(({ id, schedule, command }) => ({ id, schedule, command })) })
+				body: JSON.stringify({
+					jobs: jobs.map(({ id, schedule, command, disabled }) => ({ id, schedule, command, disabled }))
+				})
 			});
 			jobs = res.jobs;
 			toast.success('Cron jobs saved');
@@ -654,7 +656,7 @@
 								</button>
 							{/each}
 						</div>
-						<div class="flex flex-wrap items-center gap-2">
+						<div class="flex flex-wrap items-center gap-3">
 							<Button
 								variant="outline"
 								size="sm"
@@ -663,21 +665,23 @@
 							>
 								<ExternalLinkIcon class="size-4" /> Preview page
 							</Button>
-							{#if !d.maintenance}
+							{#if d.maintenance && maintTpl !== (d.maintenanceTpl || 'clean')}
 								<Button size="sm" onclick={() => setMaintenance(true)} disabled={maintBusy}>
-									<WrenchIcon class="size-4" />
-									{maintBusy ? 'Enabling…' : 'Enable maintenance mode'}
-								</Button>
-							{:else}
-								{#if maintTpl !== (d.maintenanceTpl || 'clean')}
-									<Button size="sm" onclick={() => setMaintenance(true)} disabled={maintBusy}>
-										Switch to this page
-									</Button>
-								{/if}
-								<Button variant="outline" size="sm" onclick={() => setMaintenance(false)} disabled={maintBusy}>
-									{maintBusy ? 'Working…' : 'Turn off, bring the site back'}
+									Switch to this page
 								</Button>
 							{/if}
+							<div class="ml-auto flex items-center gap-2">
+								<WrenchIcon class="text-muted-foreground size-4" />
+								<span class="text-sm {d.maintenance ? 'text-amber-500' : 'text-muted-foreground'}">
+									{maintBusy ? 'Working…' : d.maintenance ? 'Maintenance on' : 'Maintenance off'}
+								</span>
+								<Switch
+									checked={d.maintenance}
+									onCheckedChange={(v) => setMaintenance(v)}
+									disabled={maintBusy}
+									aria-label="Maintenance mode on or off"
+								/>
+							</div>
 						</div>
 					</Card.Content>
 				</Card.Root>
@@ -791,8 +795,10 @@
 					<Card.Content class="grid gap-2">
 						{#each jobs as job, i (job.id || i)}
 							{@const badge = lastBadge(job.last)}
-							<div class="flex flex-wrap items-start gap-3 rounded-md border p-3">
-								<CronInput bind:value={job.schedule} />
+							<div class="flex flex-wrap items-start gap-3 rounded-md border p-3 {job.disabled ? 'opacity-70' : ''}">
+								<div class={job.disabled ? 'pointer-events-none opacity-60' : ''}>
+									<CronInput bind:value={job.schedule} />
+								</div>
 								<div class="grid min-w-56 flex-1 gap-1">
 									<Input class="font-mono text-xs" placeholder="node scripts/cleanup.js" bind:value={job.command} />
 									<p class="text-muted-foreground text-xs">Command to run inside the app</p>
@@ -802,14 +808,27 @@
 										{badge.label}
 									</Badge>
 								{/if}
-								<Button
-									variant="ghost"
-									size="icon"
-									onclick={() => (jobs = jobs.filter((_, j) => j !== i))}
-									aria-label="Remove job"
-								>
-									<Trash2Icon class="size-4" />
-								</Button>
+								<div class="mt-2 flex items-center gap-2">
+									<span class="text-xs {job.disabled ? 'text-muted-foreground' : 'text-emerald-500'}">
+										{job.disabled ? 'Off' : 'On'}
+									</span>
+									<Switch
+										checked={!job.disabled}
+										onCheckedChange={(v) => {
+											job.disabled = !v;
+											if (job.id) saveCron();
+										}}
+										aria-label="Job on or off"
+									/>
+									<Button
+										variant="ghost"
+										size="icon"
+										onclick={() => (jobs = jobs.filter((_, j) => j !== i))}
+										aria-label="Remove job"
+									>
+										<Trash2Icon class="size-4" />
+									</Button>
+								</div>
 							</div>
 						{:else}
 							<p class="text-muted-foreground text-sm">No jobs yet. Add one and pick how often it runs.</p>

@@ -22,7 +22,8 @@ type cronJob struct {
 	ID       string `json:"id"`
 	Schedule string `json:"schedule"`
 	Command  string `json:"command"`
-	Last     string `json:"last,omitempty"` // filled on read, not stored
+	Disabled bool   `json:"disabled,omitempty"` // kept in the list but not written to cron
+	Last     string `json:"last,omitempty"`     // filled on read, not stored
 }
 
 type appMeta struct {
@@ -77,7 +78,13 @@ func validSchedule(s string) bool {
 
 func writeCronFile(app string, jobs []cronJob) error {
 	path := filepath.Join(cronDir, "gantry-"+app)
-	if len(jobs) == 0 {
+	active := 0
+	for _, j := range jobs {
+		if !j.Disabled {
+			active++
+		}
+	}
+	if active == 0 {
 		os.Remove(path)
 		return nil
 	}
@@ -90,6 +97,9 @@ func writeCronFile(app string, jobs []cronJob) error {
 	var b strings.Builder
 	b.WriteString("# managed by gantry, edit via the panel, not by hand\nSHELL=/bin/sh\nPATH=/usr/local/bin:/usr/bin:/bin\n")
 	for _, j := range jobs {
+		if j.Disabled {
+			continue
+		}
 		logf := filepath.Join(cronLogDir(), app+"-"+j.ID+".log")
 		inner := fmt.Sprintf("dokku --rm run %s %s; echo \"$(date -Is) exit=$?\" >> %s", app, j.Command, logf)
 		inner = strings.ReplaceAll(inner, "'", `'\''`)

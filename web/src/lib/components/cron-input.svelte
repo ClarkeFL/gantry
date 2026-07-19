@@ -5,10 +5,9 @@
 	// and converted to server clock for the stored cron expression.
 	let {
 		value = $bindable(''),
-		allowEmpty = false,
 		compact = false,
 		onchange
-	}: { value?: string; allowEmpty?: boolean; compact?: boolean; onchange?: () => void } = $props();
+	}: { value?: string; compact?: boolean; onchange?: () => void } = $props();
 
 	import {
 		serverInfo,
@@ -29,8 +28,6 @@
 		['0', 'Sunday']
 	];
 
-	// starts as 'daily'; the value-parsing effect below switches to 'off'
-	// for an empty value when allowEmpty is set
 	let mode = $state('daily');
 	let everyN = $state(15);
 	let time = $state('03:00'); // always in the operator's timezone
@@ -64,8 +61,6 @@
 	function build(): string {
 		const [h, m] = toServerHM();
 		switch (mode) {
-			case 'off':
-				return '';
 			case 'minutes':
 				return `*/${everyN} * * * *`;
 			case 'hourly':
@@ -92,8 +87,7 @@
 		v = (v ?? '').trim();
 		let m: RegExpMatchArray | null;
 		if (!v) {
-			if (allowEmpty) mode = 'off';
-			return;
+			return; // keep current picker state; caller's toggle decides on/off
 		}
 		if ((m = v.match(/^\*\/(\d+) \* \* \* \*$/))) {
 			mode = 'minutes';
@@ -154,8 +148,6 @@
 		const [h, m] = hm();
 		const t = pad(h) + ':' + pad(m);
 		switch (mode) {
-			case 'off':
-				return 'Not scheduled';
 			case 'minutes':
 				return `Runs every ${everyN} minutes (server clock)`;
 			case 'hourly':
@@ -186,7 +178,6 @@
 <div class="grid gap-1.5">
 	<div class="flex flex-wrap items-center gap-2">
 		<select class={ctl} bind:value={mode} onchange={emit} aria-label="How often">
-			{#if allowEmpty}<option value="off">Off</option>{/if}
 			<option value="minutes">Every few minutes</option>
 			<option value="hourly">Every hour</option>
 			<option value="daily">Every day</option>
@@ -239,7 +230,7 @@
 		{/if}
 	</div>
 	<p class="text-muted-foreground text-xs">
-		{summary}{#if !compact && mode !== 'off' && mode !== 'custom'}
+		{summary}{#if !compact && mode !== 'custom'}
 			<span class="ml-1.5 font-mono opacity-60"> · {build()}</span>
 		{/if}
 	</p>

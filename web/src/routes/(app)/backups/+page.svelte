@@ -7,6 +7,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import { Switch } from '$lib/components/ui/switch';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import DatabaseIcon from '@lucide/svelte/icons/database';
@@ -19,7 +20,7 @@
 	import { serverInfo, userTzLabel, userTzFull, serverTzLabel } from '$lib/server-info.svelte';
 	import ArchiveRestoreIcon from '@lucide/svelte/icons/archive-restore';
 
-	type Db = { type: string; name: string; schedule: string };
+	type Db = { type: string; name: string; schedule: string; enabled: boolean };
 
 	let dbs = $state<Db[]>([]);
 	let appNames = $state<string[]>([]);
@@ -37,9 +38,11 @@
 
 	// per-row schedule edits
 	let schedules = $state<Record<string, string>>({});
+	let enabled = $state<Record<string, boolean>>({});
 
 	// server backup
 	let serverSchedule = $state('');
+	let serverEnabled = $state(false);
 	let serverKeep = $state(7);
 	let lastBackup = $state('');
 	let savingServer = $state(false);
@@ -56,18 +59,17 @@
 		};
 	});
 
-	async function saveServerSchedule(e: SubmitEvent) {
-		e.preventDefault();
+	async function saveServer() {
 		savingServer = true;
 		try {
 			await api('/backup/server/schedule', {
 				method: 'POST',
-				body: JSON.stringify({ schedule: serverSchedule.trim(), keep: serverKeep })
+				body: JSON.stringify({ schedule: serverSchedule.trim(), keep: serverKeep, enabled: serverEnabled })
 			});
 			toast.success(
-				serverSchedule.trim()
-					? `Server backup scheduled: ${serverSchedule.trim()}, keeping last ${serverKeep}`
-					: 'Server backup schedule removed'
+				serverEnabled && serverSchedule.trim()
+					? `Scheduled backups on, keeping last ${serverKeep}`
+					: 'Saved. Scheduled backups are off'
 			);
 			await load();
 		} catch (e) {
@@ -75,6 +77,17 @@
 		} finally {
 			savingServer = false;
 		}
+	}
+
+	function saveServerSchedule(e: SubmitEvent) {
+		e.preventDefault();
+		saveServer();
+	}
+
+	function toggleServer(on: boolean) {
+		serverEnabled = on;
+		if (on && !serverSchedule.trim()) serverSchedule = '0 3 * * *';
+		saveServer();
 	}
 
 	function serverBackupNow() {
@@ -113,9 +126,13 @@
 			s3Set = d.s3Set;
 			bucket = d.bucket ?? '';
 			serverSchedule = d.serverSchedule ?? '';
+			serverEnabled = d.serverEnabled ?? false;
 			serverKeep = d.serverKeep ?? 7;
 			lastBackup = d.lastBackup ?? '';
-			for (const db of dbs) schedules[db.type + '/' + db.name] = db.schedule;
+			for (const db of dbs) {
+				schedules[db.type + '/' + db.name] = db.schedule;
+				enabled[db.type + '/' + db.name] = db.enabled;
+			}
 			const s = await api('/settings');
 			s3Bucket = s.s3.bucket ?? '';
 			s3Region = s.s3.region ?? '';
@@ -156,6 +173,13 @@
 	let saveState = $state<Record<string, string>>({});
 	const saveTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
+	function toggleDb(db: Db, on: boolean) {
+		const key = db.type + '/' + db.name;
+		enabled[key] = on;
+		if (on && !(schedules[key] ?? '').trim()) schedules[key] = '0 3 * * *';
+		scheduleChanged(db);
+	}
+
 	function scheduleChanged(db: Db) {
 		const key = db.type + '/' + db.name;
 		clearTimeout(saveTimers[key]);
@@ -164,7 +188,12 @@
 			try {
 				await api('/services/backup/schedule', {
 					method: 'POST',
-					body: JSON.stringify({ type: db.type, name: db.name, schedule: (schedules[key] ?? '').trim() })
+					body: JSON.stringify({
+						type: db.type,
+						name: db.name,
+						schedule: (schedules[key] ?? '').trim(),
+						enabled: enabled[key] ?? false
+					})
 				});
 				saveState[key] = 'saved';
 				setTimeout(() => {
@@ -389,10 +418,23 @@
 					<div class="flex items-center gap-1.5">
 						<Label class="text-sm font-medium">Schedule</Label>
 						<InfoTip
-							text={`Pick when the server archive runs. Times are in your timezone (${userTzFull()}), converted to server time (${serverTzLabel() || 'server'}) for cron.`}
+							text={`Pick when the server archive runs. Times are in your timezone (${userTzFull()}), converted to server time (${serverTzLabel() || 'server'}) for cron. The switch turns scheduled backups on or off without losing the settings.`}
 						/>
+						<div class="ml-auto flex items-center gap-2">
+							<span class="text-xs {serverEnabled ? 'text-emerald-500' : 'text-muted-foreground'}">
+								{serverEnabled ? 'On' : 'Off'}
+							</span>
+							<Switch
+								checked={serverEnabled}
+								onCheckedChange={toggleServer}
+								disabled={!s3Set || savingServer}
+								aria-label="Scheduled server backups on or off"
+							/>
+						</div>
 					</div>
-					<CronInput bind:value={serverSchedule} allowEmpty />
+					<div class={serverEnabled ? '' : 'opacity-60'}>
+						<CronInput bind:value={serverSchedule} />
+					</div>
 				</div>
 
 				<!-- Retention + status -->
@@ -521,12 +563,20 @@
 									? 'Schedule saved'
 									: ''}
 						</span>
+						<Switch
+							checked={enabled[key] ?? false}
+							onCheckedChange={(v) => toggleDb(db, v)}
+							disabled={!s3Set}
+							aria-label="Scheduled backups for {db.name} on or off"
+						/>
 						<Button size="sm" onclick={() => backupNow(db)} disabled={!s3Set}>
 							<CloudUploadIcon class="size-4" /> Backup now
 						</Button>
 					</div>
 					{#if s3Set}
-						<CronInput compact bind:value={schedules[key]} allowEmpty onchange={() => scheduleChanged(db)} />
+						<div class={enabled[key] ? '' : 'opacity-60'}>
+							<CronInput compact bind:value={schedules[key]} onchange={() => scheduleChanged(db)} />
+						</div>
 					{/if}
 				</div>
 			{/each}

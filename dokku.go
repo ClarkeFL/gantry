@@ -101,6 +101,14 @@ var (
 	mockLinks       = map[string][]string{"postgres/main-db": {"api"}} // "type/name" -> apps
 	mockSchedules   = map[string]string{}                             // "type/name" -> cron
 	mockMaintenance = map[string]bool{}                               // app -> maintenance on
+	// which dokku service plugins are "installed" in mock (postgres+redis match seed data)
+	mockPlugins = map[string]bool{
+		"postgres": true,
+		"redis":    true,
+		"mysql":    false,
+		"mariadb":  false,
+		"mongo":    false,
+	}
 )
 
 // Env key/value injected when linking a service, matching real dokku plugins.
@@ -143,13 +151,14 @@ type mockState struct {
 	Links       map[string][]string          `json:"links"`
 	Schedules   map[string]string            `json:"schedules"`
 	Maintenance map[string]bool              `json:"maintenance"`
+	Plugins     map[string]bool              `json:"plugins"`
 }
 
 func mockStatePath() string { return filepath.Join(dataDir, "mockstate.json") }
 
 // saveMockState is called with mockMu held.
 func saveMockState() {
-	b, _ := json.Marshal(mockState{mockEnv, mockRunning, mockSSL, mockDomains, mockServices, mockLinks, mockSchedules, mockMaintenance})
+	b, _ := json.Marshal(mockState{mockEnv, mockRunning, mockSSL, mockDomains, mockServices, mockLinks, mockSchedules, mockMaintenance, mockPlugins})
 	os.WriteFile(mockStatePath(), b, 0o644)
 }
 
@@ -171,6 +180,12 @@ func loadMockState() {
 	}
 	if s.Maintenance != nil {
 		mockMaintenance = s.Maintenance
+	}
+	if s.Plugins != nil {
+		// merge so new types default in if we add them later
+		for k, v := range s.Plugins {
+			mockPlugins[k] = v
+		}
 	}
 }
 
@@ -228,8 +243,18 @@ func mockDokku(args []string) (string, error) {
 	case verb == "maintenance:on", verb == "maintenance:off":
 		mockMaintenance[app] = verb == "maintenance:on"
 		return "-----> OK", nil
+	case verb == "plugin:installed":
+		name := args[len(args)-1]
+		if mockPlugins[name] {
+			return "true", nil
+		}
+		return "", fmt.Errorf("plugin not installed")
 	case strings.HasSuffix(verb, ":links"):
-		return strings.Join(mockLinks[strings.Split(verb, ":")[0]+"/"+args[i+1]], "\n"), nil
+		svcType := strings.Split(verb, ":")[0]
+		if !mockPlugins[svcType] {
+			return "", fmt.Errorf("plugin not installed")
+		}
+		return strings.Join(mockLinks[svcType+"/"+args[i+1]], "\n"), nil
 	case strings.HasSuffix(verb, ":link"):
 		// Mirrors real dokku <plugin>:link: record the link and inject the
 		// connection URL into the app's config (DATABASE_URL, REDIS_URL, …).
