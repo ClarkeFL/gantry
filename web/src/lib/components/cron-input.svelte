@@ -1,7 +1,8 @@
 <script lang="ts">
 	// Friendly cron builder: pick a frequency and real times/days instead of
-	// writing cron syntax. Custom mode still accepts raw 5-field cron. Always
-	// shows the generated schedule and a plain-English summary.
+	// writing cron syntax. Custom mode still accepts raw 5-field cron.
+	// Times are entered in the operator's timezone (Settings → Your timezone)
+	// and converted to server clock for the stored cron expression.
 	let {
 		value = $bindable(''),
 		allowEmpty = false,
@@ -9,7 +10,14 @@
 		onchange
 	}: { value?: string; allowEmpty?: boolean; compact?: boolean; onchange?: () => void } = $props();
 
-	import { serverInfo, browserOffsetMin } from '$lib/server-info.svelte';
+	import {
+		serverInfo,
+		displayPrefs,
+		userOffsetMin,
+		userTzLabel,
+		serverTzLabel,
+		shiftHM
+	} from '$lib/server-info.svelte';
 
 	const DAYS: [string, string][] = [
 		['1', 'Monday'],
@@ -25,7 +33,7 @@
 	// for an empty value when allowEmpty is set
 	let mode = $state('daily');
 	let everyN = $state(15);
-	let time = $state('03:00');
+	let time = $state('03:00'); // always in the operator's timezone
 	let weekday = $state('1');
 	let monthday = $state(1);
 	let custom = $state('');
@@ -40,8 +48,21 @@
 		return [isNaN(h) ? 0 : h, isNaN(m) ? 0 : m];
 	}
 
-	function build(): string {
+	// User-entered time → server clock (what cron actually runs on).
+	function toServerHM(): [number, number] {
 		const [h, m] = hm();
+		if (!serverInfo.known) return [h, m];
+		return shiftHM(h, m, userOffsetMin(), serverInfo.tzOffsetMin);
+	}
+
+	// Server clock → user-entered time for the picker.
+	function fromServerHM(h: number, m: number): [number, number] {
+		if (!serverInfo.known) return [h, m];
+		return shiftHM(h, m, serverInfo.tzOffsetMin, userOffsetMin());
+	}
+
+	function build(): string {
+		const [h, m] = toServerHM();
 		switch (mode) {
 			case 'off':
 				return '';
@@ -81,14 +102,17 @@
 			mode = 'hourly';
 		} else if ((m = v.match(/^(\d+) (\d+) \* \* \*$/))) {
 			mode = 'daily';
-			time = pad(+m[2]) + ':' + pad(+m[1]);
+			const [uh, um] = fromServerHM(+m[2], +m[1]);
+			time = pad(uh) + ':' + pad(um);
 		} else if ((m = v.match(/^(\d+) (\d+) \* \* ([0-6])$/))) {
 			mode = 'weekly';
-			time = pad(+m[2]) + ':' + pad(+m[1]);
+			const [uh, um] = fromServerHM(+m[2], +m[1]);
+			time = pad(uh) + ':' + pad(um);
 			weekday = m[3];
 		} else if ((m = v.match(/^(\d+) (\d+) (\d+) \* \*$/))) {
 			mode = 'monthly';
-			time = pad(+m[2]) + ':' + pad(+m[1]);
+			const [uh, um] = fromServerHM(+m[2], +m[1]);
+			time = pad(uh) + ':' + pad(um);
 			monthday = +m[3];
 		} else {
 			mode = 'custom';
@@ -103,16 +127,28 @@
 		}
 	});
 
-	// schedules run on the server's clock; when the viewer is in a different
-	// timezone, show their local equivalent next to the picked time
-	const tzHint = $derived.by(() => {
-		if (!serverInfo.known) return '';
-		const diff = browserOffsetMin() - serverInfo.tzOffsetMin;
-		if (diff === 0) return '';
-		const [h, m] = hm();
-		const total = (h * 60 + m + diff + 2880) % 1440;
-		return ` server time (${pad(Math.floor(total / 60))}:${pad(total % 60)} your time)`;
+	// When the operator's timezone preference (or server offset) changes,
+	// force a re-parse of the stored server-time cron into the picker.
+	let tzKey = $state('');
+	$effect(() => {
+		const next = displayPrefs.tz + ':' + serverInfo.tzOffsetMin;
+		if (next === tzKey) return;
+		tzKey = next;
+		lastEmitted = null;
 	});
+
+	const hasTime = $derived(mode === 'daily' || mode === 'weekly' || mode === 'monthly');
+
+	const serverTimeStr = $derived.by(() => {
+		const [h, m] = toServerHM();
+		return `${pad(h)}:${pad(m)}`;
+	});
+
+	const yourLabel = $derived(userTzLabel());
+	const srvLabel = $derived(serverTzLabel() || 'server');
+	const sameZone = $derived(
+		serverInfo.known && userOffsetMin() === serverInfo.tzOffsetMin
+	);
 
 	const summary = $derived.by(() => {
 		const [h, m] = hm();
@@ -121,19 +157,25 @@
 			case 'off':
 				return 'Not scheduled';
 			case 'minutes':
-				return `Runs every ${everyN} minutes`;
+				return `Runs every ${everyN} minutes (server clock)`;
 			case 'hourly':
-				return 'Runs every hour, on the hour';
+				return 'Runs every hour, on the hour (server clock)';
 			case 'daily':
-				return `Runs every day at ${t}${tzHint}`;
+				return sameZone
+					? `Runs every day at ${t} ${yourLabel}`
+					: `Runs every day at ${t} ${yourLabel} · ${serverTimeStr} ${srvLabel} on the server`;
 			case 'weekly':
-				return `Runs every ${DAYS.find((d) => d[0] === weekday)?.[1]} at ${t}${tzHint}`;
+				return sameZone
+					? `Runs every ${DAYS.find((d) => d[0] === weekday)?.[1]} at ${t} ${yourLabel}`
+					: `Runs every ${DAYS.find((d) => d[0] === weekday)?.[1]} at ${t} ${yourLabel} · ${serverTimeStr} ${srvLabel} on the server`;
 			case 'monthly':
-				return `Runs on day ${monthday} of every month at ${t}${tzHint}`;
+				return sameZone
+					? `Runs on day ${monthday} of every month at ${t} ${yourLabel}`
+					: `Runs on day ${monthday} of every month at ${t} ${yourLabel} · ${serverTimeStr} ${srvLabel} on the server`;
 			default:
 				return custom.trim().split(/\s+/).length === 5
-					? 'Custom schedule'
-					: 'Needs 5 parts: minute hour day month weekday';
+					? `Custom cron (server time${srvLabel ? `, ${srvLabel}` : ''})`
+					: `Needs 5 parts: minute hour day month weekday (server time${srvLabel ? `, ${srvLabel}` : ''})`;
 		}
 	});
 
@@ -174,20 +216,31 @@
 				aria-label="Day of month"
 			/>
 		{/if}
-		{#if mode === 'daily' || mode === 'weekly' || mode === 'monthly'}
+		{#if hasTime}
 			<span class="text-muted-foreground text-sm">at</span>
-			<input type="time" class={ctl} bind:value={time} onchange={emit} aria-label="Time" />
+			<input type="time" class={ctl} bind:value={time} onchange={emit} aria-label="Time in your timezone" />
+			<span
+				class="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[11px] font-medium tracking-wide"
+				title="Times are in your timezone (Settings → Your timezone). Cron runs on the server clock."
+			>
+				{yourLabel}
+			</span>
 		{:else if mode === 'custom'}
 			<input
-				class="{ctl} w-32 font-mono text-xs"
+				class="{ctl} w-36 font-mono text-xs"
 				placeholder="0 3 * * *"
 				bind:value={custom}
 				oninput={emit}
-				aria-label="Cron expression"
+				aria-label="Cron expression (server time)"
 			/>
+			<span class="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[11px] font-medium tracking-wide">
+				{srvLabel || 'server'}
+			</span>
 		{/if}
 	</div>
 	<p class="text-muted-foreground text-xs">
-		{summary}{#if !compact && mode !== 'off' && mode !== 'custom'}<span class="ml-1.5 font-mono opacity-60">{build()}</span>{/if}
+		{summary}{#if !compact && mode !== 'off' && mode !== 'custom'}
+			<span class="ml-1.5 font-mono opacity-60"> · {build()}</span>
+		{/if}
 	</p>
 </div>

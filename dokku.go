@@ -98,27 +98,58 @@ var (
 		"api":     {"api.example.com"},
 		"landing": {"example.com", "www.example.com"},
 	}
-	mockLinks     = map[string][]string{"postgres/main-db": {"api"}} // "type/name" -> apps
-	mockSchedules = map[string]string{}                             // "type/name" -> cron
+	mockLinks       = map[string][]string{"postgres/main-db": {"api"}} // "type/name" -> apps
+	mockSchedules   = map[string]string{}                             // "type/name" -> cron
+	mockMaintenance = map[string]bool{}                               // app -> maintenance on
 )
+
+// Env key/value injected when linking a service, matching real dokku plugins.
+func mockLinkEnvKey(svcType string) string {
+	switch svcType {
+	case "postgres", "mysql", "mariadb":
+		return "DATABASE_URL"
+	case "redis":
+		return "REDIS_URL"
+	case "mongo":
+		return "MONGO_URL"
+	default:
+		return strings.ToUpper(svcType) + "_URL"
+	}
+}
+
+func mockLinkEnvValue(svcType, svcName, app string) string {
+	switch svcType {
+	case "postgres":
+		return fmt.Sprintf("postgres://postgres:password@%s:5432/%s", svcName, app)
+	case "mysql", "mariadb":
+		return fmt.Sprintf("mysql://mysql:password@%s:3306/%s", svcName, app)
+	case "redis":
+		return fmt.Sprintf("redis://%s:6379", svcName)
+	case "mongo":
+		return fmt.Sprintf("mongodb://%s:27017/%s", svcName, app)
+	default:
+		return fmt.Sprintf("%s://%s", svcType, svcName)
+	}
+}
 
 // mock state persists across panel restarts so dev behaves like real dokku
 // (which keeps SSL/running/domain state itself).
 type mockState struct {
-	Env       map[string]map[string]string `json:"env"`
-	Running   map[string]bool              `json:"running"`
-	SSL       map[string]bool              `json:"ssl"`
-	Domains   map[string][]string          `json:"domains"`
-	Services  []service                    `json:"services"`
-	Links     map[string][]string          `json:"links"`
-	Schedules map[string]string            `json:"schedules"`
+	Env         map[string]map[string]string `json:"env"`
+	Running     map[string]bool              `json:"running"`
+	SSL         map[string]bool              `json:"ssl"`
+	Domains     map[string][]string          `json:"domains"`
+	Services    []service                    `json:"services"`
+	Links       map[string][]string          `json:"links"`
+	Schedules   map[string]string            `json:"schedules"`
+	Maintenance map[string]bool              `json:"maintenance"`
 }
 
 func mockStatePath() string { return filepath.Join(dataDir, "mockstate.json") }
 
 // saveMockState is called with mockMu held.
 func saveMockState() {
-	b, _ := json.Marshal(mockState{mockEnv, mockRunning, mockSSL, mockDomains, mockServices, mockLinks, mockSchedules})
+	b, _ := json.Marshal(mockState{mockEnv, mockRunning, mockSSL, mockDomains, mockServices, mockLinks, mockSchedules, mockMaintenance})
 	os.WriteFile(mockStatePath(), b, 0o644)
 }
 
@@ -137,6 +168,9 @@ func loadMockState() {
 	}
 	if s.Schedules != nil {
 		mockSchedules = s.Schedules
+	}
+	if s.Maintenance != nil {
+		mockMaintenance = s.Maintenance
 	}
 }
 
@@ -189,22 +223,49 @@ func mockDokku(args []string) (string, error) {
 		delete(mockRunning, app)
 		delete(mockDomains, app)
 		delete(mockSSL, app)
+		delete(mockMaintenance, app)
 		return "-----> Destroyed " + app, nil
+	case verb == "maintenance:on", verb == "maintenance:off":
+		mockMaintenance[app] = verb == "maintenance:on"
+		return "-----> OK", nil
 	case strings.HasSuffix(verb, ":links"):
 		return strings.Join(mockLinks[strings.Split(verb, ":")[0]+"/"+args[i+1]], "\n"), nil
 	case strings.HasSuffix(verb, ":link"):
-		key := strings.Split(verb, ":")[0] + "/" + args[i+1]
-		mockLinks[key] = append(mockLinks[key], args[i+2])
+		// Mirrors real dokku <plugin>:link: record the link and inject the
+		// connection URL into the app's config (DATABASE_URL, REDIS_URL, …).
+		svcType := strings.Split(verb, ":")[0]
+		svcName, appName := args[i+1], args[i+2]
+		key := svcType + "/" + svcName
+		// avoid duplicate link entries
+		already := false
+		for _, a := range mockLinks[key] {
+			if a == appName {
+				already = true
+				break
+			}
+		}
+		if !already {
+			mockLinks[key] = append(mockLinks[key], appName)
+		}
+		if mockEnv[appName] == nil {
+			mockEnv[appName] = map[string]string{}
+		}
+		mockEnv[appName][mockLinkEnvKey(svcType)] = mockLinkEnvValue(svcType, svcName, appName)
 		return "-----> Linked", nil
 	case strings.HasSuffix(verb, ":unlink"):
-		key := strings.Split(verb, ":")[0] + "/" + args[i+1]
+		svcType := strings.Split(verb, ":")[0]
+		svcName, appName := args[i+1], args[i+2]
+		key := svcType + "/" + svcName
 		kept := []string{}
 		for _, a := range mockLinks[key] {
-			if a != args[i+2] {
+			if a != appName {
 				kept = append(kept, a)
 			}
 		}
 		mockLinks[key] = kept
+		if mockEnv[appName] != nil {
+			delete(mockEnv[appName], mockLinkEnvKey(svcType))
+		}
 		return "-----> Unlinked", nil
 	case strings.HasSuffix(verb, ":backup-schedule-cat"):
 		key := strings.Split(verb, ":")[0] + "/" + args[i+1]

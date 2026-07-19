@@ -9,6 +9,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import CronInput from '$lib/components/cron-input.svelte';
 	import { ago, fmtDate } from '$lib/dates';
+	import { userTzFull, serverTzLabel } from '$lib/server-info.svelte';
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Skeleton } from '$lib/components/ui/skeleton';
@@ -23,6 +24,7 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import LockIcon from '@lucide/svelte/icons/lock';
+	import WrenchIcon from '@lucide/svelte/icons/wrench';
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 
@@ -45,6 +47,8 @@
 		image: string;
 		lastDeploy: string;
 		lastDeployOk: boolean;
+		maintenance: boolean;
+		maintenanceTpl: string;
 	};
 
 	const name = $derived(page.params.name!);
@@ -69,6 +73,15 @@
 	// destroy
 	let destroyConfirm = $state('');
 	let destroying = $state(false);
+
+	// maintenance mode
+	const MAINT_TEMPLATES = [
+		{ id: 'clean', label: 'Clean', desc: 'Light page, "We’ll be right back".' },
+		{ id: 'dark', label: 'Dark', desc: 'Dark page with a loading spinner.' },
+		{ id: 'construction', label: 'Construction', desc: 'Playful "under construction" page.' }
+	];
+	let maintTpl = $state('clean');
+	let maintBusy = $state(false);
 
 	// logs
 	let logLines = $state<string[]>([]);
@@ -126,6 +139,7 @@
 		srcDf = d.dockerfile ?? '';
 		srcImage = d.image ?? '';
 		srcType = srcRepo ? 'repo' : srcImage ? 'image' : 'none';
+		maintTpl = d.maintenanceTpl || 'clean';
 
 		const waiting = d.domains.some((x) => !x.dnsOk);
 		// poll while any domain waits on DNS; when all resolve, request the cert once
@@ -364,6 +378,22 @@
 		}
 	}
 
+	async function setMaintenance(on: boolean) {
+		maintBusy = true;
+		try {
+			await api(`/apps/${name}/maintenance`, {
+				method: 'POST',
+				body: JSON.stringify({ on, template: maintTpl })
+			});
+			toast.success(on ? 'Maintenance page is up' : 'Maintenance mode is off, your site is back');
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			maintBusy = false;
+		}
+	}
+
 	async function destroyApp() {
 		destroying = true;
 		try {
@@ -394,6 +424,9 @@
 		<div class="mb-6 flex flex-wrap items-center gap-3">
 			<h1 class="text-2xl font-semibold tracking-tight">{d.name}</h1>
 			<Badge variant={d.running ? 'default' : 'destructive'}>{d.running ? 'running' : 'stopped'}</Badge>
+			{#if d.maintenance}
+				<Badge class="border-transparent bg-amber-500/15 text-amber-500">maintenance</Badge>
+			{/if}
 			{#if d.lastDeploy && !d.lastDeployOk}
 				<Badge variant="destructive" title={fmtDate(d.lastDeploy)}>last deploy failed · {ago(d.lastDeploy)}</Badge>
 			{/if}
@@ -576,6 +609,81 @@
 
 				<Card.Root>
 					<Card.Header>
+						<Card.Title class="flex items-center gap-2 text-base">
+							Maintenance mode
+							{#if d.maintenance}
+								<Badge class="border-transparent bg-amber-500/15 text-amber-500">on</Badge>
+							{/if}
+						</Card.Title>
+						<Card.Description>
+							Puts a temporary "be right back" page in front of this app while you work on it.
+							Visitors see that page instead of your site until you turn it off.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="grid gap-4">
+						<div class="grid gap-3 sm:grid-cols-3">
+							{#each MAINT_TEMPLATES as t (t.id)}
+								<button
+									type="button"
+									class="rounded-lg border p-2.5 text-left transition-colors {maintTpl === t.id
+										? 'border-primary ring-primary/25 ring-2'
+										: 'hover:border-muted-foreground/40'}"
+									onclick={() => (maintTpl = t.id)}
+								>
+									{#if t.id === 'clean'}
+										<div class="mb-2 flex h-16 flex-col items-center justify-center gap-1.5 rounded-md" style="background:#f8fafc">
+											<div class="size-1.5 rounded-full bg-amber-500"></div>
+											<div class="h-1.5 w-16 rounded bg-slate-800/80"></div>
+											<div class="h-1 w-24 rounded bg-slate-400/60"></div>
+										</div>
+									{:else if t.id === 'dark'}
+										<div class="mb-2 flex h-16 flex-col items-center justify-center gap-1.5 rounded-md" style="background:#0d1117">
+											<div class="size-3 rounded-full border-2 border-slate-700 border-t-sky-400"></div>
+											<div class="h-1.5 w-16 rounded bg-slate-200/80"></div>
+											<div class="h-1 w-24 rounded bg-slate-500/60"></div>
+										</div>
+									{:else}
+										<div class="relative mb-2 flex h-16 flex-col items-center justify-center gap-1 overflow-hidden rounded-md" style="background:#fffbeb">
+											<div class="absolute inset-x-0 top-0 h-1.5" style="background:repeating-linear-gradient(45deg,#f59e0b 0 5px,#1c1917 5px 10px)"></div>
+											<div class="text-sm leading-none">🚧</div>
+											<div class="h-1.5 w-16 rounded bg-stone-800/80"></div>
+										</div>
+									{/if}
+									<div class="text-sm font-medium">{t.label}</div>
+									<p class="text-muted-foreground text-xs">{t.desc}</p>
+								</button>
+							{/each}
+						</div>
+						<div class="flex flex-wrap items-center gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								href="/api/maintenance/preview?template={maintTpl}&app={d.name}"
+								target="_blank"
+							>
+								<ExternalLinkIcon class="size-4" /> Preview page
+							</Button>
+							{#if !d.maintenance}
+								<Button size="sm" onclick={() => setMaintenance(true)} disabled={maintBusy}>
+									<WrenchIcon class="size-4" />
+									{maintBusy ? 'Enabling…' : 'Enable maintenance mode'}
+								</Button>
+							{:else}
+								{#if maintTpl !== (d.maintenanceTpl || 'clean')}
+									<Button size="sm" onclick={() => setMaintenance(true)} disabled={maintBusy}>
+										Switch to this page
+									</Button>
+								{/if}
+								<Button variant="outline" size="sm" onclick={() => setMaintenance(false)} disabled={maintBusy}>
+									{maintBusy ? 'Working…' : 'Turn off, bring the site back'}
+								</Button>
+							{/if}
+						</div>
+					</Card.Content>
+				</Card.Root>
+
+				<Card.Root>
+					<Card.Header>
 						<Card.Title class="text-base">Category</Card.Title>
 						<Card.Description>Groups this app on the dashboard.</Card.Description>
 					</Card.Header>
@@ -675,8 +783,9 @@
 						<Card.Title class="text-base">Scheduled jobs</Card.Title>
 						<Card.Description>
 							Run commands automatically on a schedule, like nightly cleanups or report scripts.
-							Each run starts a fresh copy of {d.name}, runs the command, and exits. Changes apply
-							as soon as you save, no redeploy needed.
+							Each run starts a fresh copy of {d.name}, runs the command, and exits. Times are in
+							your timezone ({userTzFull()}); cron runs on the server ({serverTzLabel() || 'server'}).
+							Changes apply as soon as you save, no redeploy needed.
 						</Card.Description>
 					</Card.Header>
 					<Card.Content class="grid gap-2">

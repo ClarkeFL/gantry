@@ -29,6 +29,9 @@ fi
 # 1b. letsencrypt plugin for one-click SSL (skipped if present)
 dokku plugin:installed letsencrypt >/dev/null 2>&1 || dokku plugin:install https://github.com/dokku/dokku-letsencrypt.git
 
+# 1c. maintenance plugin for one-click "be right back" pages
+dokku plugin:installed maintenance >/dev/null 2>&1 || dokku plugin:install https://github.com/dokku/dokku-maintenance.git maintenance
+
 # 2. gantry binary from latest GitHub release
 ARCH="$(uname -m)"
 case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac

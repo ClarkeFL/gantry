@@ -1,16 +1,29 @@
 // Human-readable dates for the whole app. Input is whatever the backend
 // emits (RFC3339, date-only, or a line starting with a timestamp); output is
-// the user's locale, e.g. "19 Jul 2026, 13:14" or "3 min ago".
+// the operator's preferred timezone (Settings → Your timezone), e.g.
+// "19 Jul 2026, 1:14 pm AEST".
+
+import { userTzName, userTzLabel } from '$lib/server-info.svelte';
 
 export function fmtDate(iso: string): string {
 	const d = new Date(iso);
 	if (isNaN(d.getTime())) return iso;
-	const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' };
-	if (iso.includes('T')) {
+	const tz = userTzName() || undefined;
+	const hasTime = /T|\d:\d/.test(iso);
+	const opts: Intl.DateTimeFormatOptions = {
+		day: 'numeric',
+		month: 'short',
+		year: 'numeric',
+		timeZone: tz
+	};
+	if (hasTime) {
 		opts.hour = '2-digit';
 		opts.minute = '2-digit';
 	}
-	return d.toLocaleString(undefined, opts);
+	const base = d.toLocaleString(undefined, opts);
+	if (!hasTime) return base;
+	const label = userTzLabel();
+	return label ? `${base} ${label}` : base;
 }
 
 export function ago(iso: string): string {

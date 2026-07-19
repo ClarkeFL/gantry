@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { api, stream } from '$lib/api';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button';
@@ -13,7 +14,9 @@
 	import BoxIcon from '@lucide/svelte/icons/box';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import CronInput from '$lib/components/cron-input.svelte';
+	import InfoTip from '$lib/components/info-tip.svelte';
 	import { fmtDate } from '$lib/dates';
+	import { serverInfo, userTzLabel, userTzFull, serverTzLabel } from '$lib/server-info.svelte';
 	import ArchiveRestoreIcon from '@lucide/svelte/icons/archive-restore';
 
 	type Db = { type: string; name: string; schedule: string };
@@ -289,25 +292,43 @@
 			}
 		);
 	}
+
+	const tzNote = $derived(
+		serverInfo.known
+			? `Times use your timezone (${userTzFull()}); cron runs on the server (${serverTzLabel()}).`
+			: `Times use your timezone (${userTzFull()}).`
+	);
 </script>
 
 <div class="mx-auto grid max-w-4xl gap-6">
-	<h1 class="text-2xl font-semibold tracking-tight">Backups</h1>
+	<div class="flex flex-wrap items-end justify-between gap-2">
+		<div>
+			<h1 class="text-2xl font-semibold tracking-tight">Backups</h1>
+			<p class="text-muted-foreground mt-1 text-sm">
+				{tzNote}
+				<a href={resolve('/settings')} class="text-foreground ml-1 underline-offset-2 hover:underline">Change timezone</a>
+			</p>
+		</div>
+	</div>
 
 	<Card.Root>
 		<Card.Header>
-			<Card.Title class="flex items-center gap-2 text-base">
+			<Card.Title class="flex items-center gap-1.5 text-base">
 				S3 storage
+				<InfoTip
+					text="Where backup files are stored. Works with AWS S3 or any S3-compatible provider (Backblaze B2, Wasabi, MinIO, Cloudflare R2) via the endpoint field. Required before any backup can run."
+				/>
 				{#if s3Set}
-					<span class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-500">configured</span>
+					<span class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-500"
+						>configured</span
+					>
 				{:else}
-					<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-500">not set</span>
+					<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-500"
+						>not set</span
+					>
 				{/if}
 			</Card.Title>
-			<Card.Description>
-				Where database dumps go. Works with AWS S3 or any S3-compatible storage (Backblaze B2,
-				Wasabi, MinIO…) via the endpoint field.
-			</Card.Description>
+			<Card.Description>Destination for all backups. Configure this first.</Card.Description>
 		</Card.Header>
 		<Card.Content>
 			<form onsubmit={saveS3} class="grid max-w-lg gap-3">
@@ -323,7 +344,10 @@
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div class="grid gap-1">
-						<Label for="s3-key">Access key {#if s3Set}<span class="text-muted-foreground">(saved, blank keeps it)</span>{/if}</Label>
+						<Label for="s3-key"
+							>Access key
+							{#if s3Set}<span class="text-muted-foreground">(saved, blank keeps it)</span>{/if}</Label
+						>
 						<Input id="s3-key" bind:value={s3Key} placeholder="AKIA…" autocomplete="off" />
 					</div>
 					<div class="grid gap-1">
@@ -332,8 +356,14 @@
 					</div>
 				</div>
 				<div class="grid gap-1">
-					<Label for="s3-endpoint">Endpoint <span class="text-muted-foreground">(optional, non-AWS only)</span></Label>
-					<Input id="s3-endpoint" bind:value={s3Endpoint} placeholder="https://s3.eu-central-003.backblazeb2.com" />
+					<Label for="s3-endpoint"
+						>Endpoint <span class="text-muted-foreground">(optional, non-AWS only)</span></Label
+					>
+					<Input
+						id="s3-endpoint"
+						bind:value={s3Endpoint}
+						placeholder="https://s3.eu-central-003.backblazeb2.com"
+					/>
 				</div>
 				<Button type="submit" class="w-fit" disabled={savingS3}>{savingS3 ? 'Saving…' : 'Save'}</Button>
 			</form>
@@ -342,54 +372,97 @@
 
 	<Card.Root>
 		<Card.Header>
-			<Card.Title class="text-base">Server backup</Card.Title>
+			<Card.Title class="flex items-center gap-1.5 text-base">
+				Server backup
+				<InfoTip
+					text="Full snapshot of this panel: settings, every app's deploy source, env vars, domains and cron jobs. If the server dies, install gantry on a new machine and run gantry restore <file> to rebuild it. App source code is not included — that lives in GitHub or the Docker image."
+				/>
+			</Card.Title>
 			<Card.Description>
-				A complete snapshot of how this server is set up: panel settings, plus every app's deploy
-				source, environment variables, domains and scheduled jobs. If this server is ever lost,
-				install gantry on a new one and bring everything back with one command
-				(<code>gantry restore &lt;file&gt;</code>).
+				Full panel + app config snapshot to S3. Use for disaster recovery.
 			</Card.Description>
 		</Card.Header>
-		<Card.Content class="grid gap-3">
-			<form onsubmit={saveServerSchedule} class="grid gap-3">
-				<div class="grid gap-1.5">
-					<Label>Schedule</Label>
+		<Card.Content>
+			<form onsubmit={saveServerSchedule} class="grid gap-4">
+				<!-- Schedule -->
+				<div class="grid gap-2 rounded-md border p-3">
+					<div class="flex items-center gap-1.5">
+						<Label class="text-sm font-medium">Schedule</Label>
+						<InfoTip
+							text={`Pick when the server archive runs. Times are in your timezone (${userTzFull()}), converted to server time (${serverTzLabel() || 'server'}) for cron.`}
+						/>
+					</div>
 					<CronInput bind:value={serverSchedule} allowEmpty />
 				</div>
-				<div class="flex flex-wrap items-center gap-3">
-					<Label for="srv-keep">Keep last</Label>
-					<Input id="srv-keep" type="number" min={1} max={100} bind:value={serverKeep} class="w-20" />
-					<span class="text-muted-foreground text-sm">backups, older ones are deleted</span>
-					<Button type="submit" variant="outline" disabled={savingServer || !s3Set}>Save</Button>
+
+				<!-- Retention + status -->
+				<div class="grid gap-3 sm:grid-cols-2">
+					<div class="grid gap-2 rounded-md border p-3">
+						<div class="flex items-center gap-1.5">
+							<Label for="srv-keep" class="text-sm font-medium">Retention</Label>
+							<InfoTip text="How many successful server backups to keep in S3. Older ones are deleted automatically after each run." />
+						</div>
+						<div class="flex items-center gap-2">
+							<span class="text-muted-foreground text-sm">Keep last</span>
+							<Input
+								id="srv-keep"
+								type="number"
+								min={1}
+								max={100}
+								bind:value={serverKeep}
+								class="w-20"
+							/>
+							<span class="text-muted-foreground text-sm">backups</span>
+						</div>
+					</div>
+					<div class="grid gap-2 rounded-md border p-3">
+						<div class="flex items-center gap-1.5">
+							<span class="text-sm font-medium">Last run</span>
+							<InfoTip text="Status of the most recent server backup. Failed runs also fire the alert webhook if configured in Settings." />
+						</div>
+						{#if lastParsed}
+							<p class="text-sm">
+								<span class="text-muted-foreground">{lastParsed.when}</span>
+								{#if lastParsed.ok === true}
+									<span class="ml-1.5 text-emerald-500">succeeded</span>
+									{#if lastParsed.detail}<span class="text-muted-foreground ml-1">({lastParsed.detail})</span>{/if}
+								{:else if lastParsed.ok === false}
+									<span class="text-destructive ml-1.5">failed</span>
+									<span class="text-muted-foreground ml-1">{lastParsed.detail}</span>
+								{/if}
+							</p>
+						{:else}
+							<p class="text-muted-foreground text-sm">No backup yet</p>
+						{/if}
+					</div>
+				</div>
+
+				<!-- Actions -->
+				<div class="flex flex-wrap items-center gap-2">
+					<Button type="submit" variant="outline" disabled={savingServer || !s3Set}>
+						{savingServer ? 'Saving…' : 'Save schedule'}
+					</Button>
 					<Button type="button" onclick={serverBackupNow} disabled={!s3Set}>
 						<CloudUploadIcon class="size-4" /> Backup now
 					</Button>
+					{#if !s3Set}
+						<span class="text-muted-foreground text-sm">Configure S3 storage above first.</span>
+					{/if}
 				</div>
 			</form>
-			{#if lastParsed}
-				<p class="text-muted-foreground flex items-center gap-1.5 text-xs">
-					Last backup: {lastParsed.when}
-					{#if lastParsed.ok === true}
-						<span class="text-emerald-500">succeeded</span>{#if lastParsed.detail}<span>({lastParsed.detail})</span>{/if}
-					{:else if lastParsed.ok === false}
-						<span class="text-red-500">failed</span> {lastParsed.detail}
-					{/if}
-				</p>
-			{/if}
-			{#if !s3Set}
-				<p class="text-muted-foreground text-sm">Configure S3 storage above first.</p>
-			{/if}
 		</Card.Content>
 	</Card.Root>
 
 	<Card.Root>
 		<Card.Header>
-			<Card.Title class="text-base">App backups</Card.Title>
+			<Card.Title class="flex items-center gap-1.5 text-base">
+				App backups
+				<InfoTip
+					text="App config is already inside every server backup. Code lives in the GitHub repo or Docker image. Use Restore to bring back one app without touching the rest of the server, or download a definition file to keep offline."
+				/>
+			</Card.Title>
 			<Card.Description>
-				Each app's setup is saved inside every server backup above, and its code lives in its
-				GitHub repo or Docker image, so a restore has everything it needs. Use Restore an app to
-				bring back a single app (for example after deleting one by mistake) without touching the
-				rest of the server, or download an app's setup as a file to keep.
+				Per-app restore and export. Config is covered by server backups above.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-2">
@@ -416,10 +489,14 @@
 
 	<Card.Root>
 		<Card.Header>
-			<Card.Title class="text-base">Database backups</Card.Title>
+			<Card.Title class="flex items-center gap-1.5 text-base">
+				Database backups
+				<InfoTip
+					text={`Dumps each database's data to your S3 bucket. Backup now is one-off; a schedule runs automatically. Times are in your timezone (${userTzFull()}), converted to the server clock for cron.`}
+				/>
+			</Card.Title>
 			<Card.Description>
-				Saves a copy of each database's data to your storage. Use Backup now for a one-off copy,
-				or set a schedule and it happens automatically.
+				Data dumps to S3. Schedule times use your timezone ({userTzFull()}).
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-2">
@@ -433,8 +510,16 @@
 						<DatabaseIcon class="text-muted-foreground size-4" />
 						<span class="text-sm font-medium">{db.name}</span>
 						<Badge variant="secondary">{db.type}</Badge>
-						<span class="ml-auto text-xs {saveState[key] === 'saved' ? 'text-emerald-500' : 'text-muted-foreground'}">
-							{saveState[key] === 'saving' ? 'Saving…' : saveState[key] === 'saved' ? 'Schedule saved' : ''}
+						<span
+							class="ml-auto text-xs {saveState[key] === 'saved'
+								? 'text-emerald-500'
+								: 'text-muted-foreground'}"
+						>
+							{saveState[key] === 'saving'
+								? 'Saving…'
+								: saveState[key] === 'saved'
+									? 'Schedule saved'
+									: ''}
 						</span>
 						<Button size="sm" onclick={() => backupNow(db)} disabled={!s3Set}>
 							<CloudUploadIcon class="size-4" /> Backup now

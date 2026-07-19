@@ -43,6 +43,7 @@ type appInfo struct {
 	Category     string `json:"category"`
 	LastDeploy   string `json:"lastDeploy,omitempty"`
 	LastDeployOK bool   `json:"lastDeployOk"`
+	Maintenance  bool   `json:"maintenance"`
 }
 
 func handleApps(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +53,7 @@ func handleApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apps := []appInfo{}
+	maint := maintenanceAll()
 	metaMu.Lock()
 	for _, name := range strings.Split(out, "\n") {
 		name = strings.TrimSpace(name)
@@ -60,7 +62,7 @@ func handleApps(w http.ResponseWriter, r *http.Request) {
 		}
 		running, _ := dokku("ps:report", name, "--running")
 		m := getMeta(name)
-		apps = append(apps, appInfo{name, running == "true", m.Category, m.LastDeploy, m.LastDeployOK})
+		apps = append(apps, appInfo{name, running == "true", m.Category, m.LastDeploy, m.LastDeployOK, maint[name]})
 	}
 	metaMu.Unlock()
 	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
@@ -130,6 +132,7 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	category := m.Category
 	repo, ref, buildDir, dockerfile, image := m.Repo, m.Ref, m.BuildDir, m.Dockerfile, m.Image
 	lastDeploy, lastDeployOK := m.LastDeploy, m.LastDeployOK
+	maintTpl := m.MaintenanceTpl
 	metaMu.Unlock()
 	for i := range jobs {
 		jobs[i].Last = lastRun(name, jobs[i].ID)
@@ -151,6 +154,8 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 		"image":        image,
 		"lastDeploy":   lastDeploy,
 		"lastDeployOk": lastDeployOK,
+		"maintenance":    maintenanceAll()[name],
+		"maintenanceTpl": maintTpl,
 	})
 }
 

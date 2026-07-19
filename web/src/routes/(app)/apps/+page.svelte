@@ -26,6 +26,7 @@
 		category: string;
 		lastDeploy?: string;
 		lastDeployOk: boolean;
+		maintenance: boolean;
 	};
 
 	let apps = $state<App[]>([]);
@@ -229,6 +230,11 @@
 									</Card.Title>
 									<Card.Description class="flex items-center gap-2">
 										{app.running ? 'Running' : 'Stopped'}
+										{#if app.maintenance}
+											<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-500">
+												maintenance
+											</span>
+										{/if}
 										{#if app.lastDeploy && !app.lastDeployOk}
 											<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-500">
 												last deploy failed

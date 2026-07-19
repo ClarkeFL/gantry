@@ -36,6 +36,8 @@ type appMeta struct {
 
 	LastDeploy   string `json:"last_deploy,omitempty"` // RFC3339
 	LastDeployOK bool   `json:"last_deploy_ok,omitempty"`
+
+	MaintenanceTpl string `json:"maintenance_tpl,omitempty"` // last-used page template
 }
 
 var (

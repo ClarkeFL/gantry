@@ -15,7 +15,7 @@
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import ClockIcon from '@lucide/svelte/icons/clock';
-	import { serverInfo, serverClock } from '$lib/server-info.svelte';
+	import { serverInfo, serverClock, displayPrefs, serverTzLabel } from '$lib/server-info.svelte';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -56,6 +56,12 @@
 			serverTime = serverClock();
 			clockTimer = setInterval(() => (serverTime = serverClock()), 15000);
 			ready = true;
+			// preferred schedule timezone (non-fatal if settings lag)
+			api('/settings')
+				.then((s) => {
+					displayPrefs.tz = s.displayTz ?? '';
+				})
+				.catch(() => {});
 			const check = await api('/update/check');
 			latest = check.latest;
 			updateAvailable = check.available;
@@ -140,10 +146,10 @@
 				{#if serverTime}
 					<div
 						class="text-muted-foreground flex items-center gap-2 px-3 py-1 text-xs"
-						title="The server's clock. Schedules run on this time."
+						title="The server's clock. Cron jobs run on this time."
 					>
 						<ClockIcon class="size-3.5 shrink-0" />
-						Server time {serverTime}{serverInfo.tz ? ` (${serverInfo.tz})` : ''}
+						Server {serverTime}{serverTzLabel() ? ` ${serverTzLabel()}` : ''}
 					</div>
 				{/if}
 				{#if updateAvailable}

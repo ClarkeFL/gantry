@@ -45,6 +45,9 @@ type panelSettings struct {
 
 	AlertWebhook string `json:"alert_webhook,omitempty"` // Slack/Discord-compatible
 	BackupKeep   int    `json:"backup_keep,omitempty"`   // server backups to retain, 0 = default 7
+
+	// IANA zone for schedule UI (e.g. "Australia/Sydney"). Empty = use browser timezone.
+	DisplayTZ string `json:"display_tz,omitempty"`
 }
 
 type apiToken struct {
@@ -113,6 +116,7 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		"keySet":   settings.S3Key != "" && settings.S3Secret != "",
 	}
 	webhook := settings.AlertWebhook
+	displayTZ := settings.DisplayTZ
 	settingsMu.Unlock()
 	out := map[string]any{
 		"githubUser":   user,
@@ -123,6 +127,7 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		"tokens":       tokens,
 		"s3":           s3,
 		"alertWebhook": webhook,
+		"displayTz":    displayTZ,
 		"email":        auth.Email,
 		"totpEnabled":  auth.TOTPSecret != "",
 		"totpPending":  auth.PendingTOTP != "",
@@ -221,6 +226,33 @@ func handleWebhookSet(w http.ResponseWriter, r *http.Request) {
 	saveSettings()
 	settingsMu.Unlock()
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleDisplayTZSet stores the operator's preferred timezone for schedule UIs.
+// Empty string means "use the browser's timezone". Value must be a valid IANA name
+// when non-empty (validated lightly via time.LoadLocation).
+func handleDisplayTZSet(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Tz string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	tz := strings.TrimSpace(req.Tz)
+	if tz != "" {
+		if _, err := time.LoadLocation(tz); err != nil {
+			httpErr(w, 400, "unknown timezone: "+tz)
+			return
+		}
+	}
+	settingsMu.Lock()
+	settings.DisplayTZ = tz
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "displayTz": tz})
 }
 
 // notifyWebhook fires-and-forgets a message to the configured webhook.

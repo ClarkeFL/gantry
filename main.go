@@ -102,7 +102,9 @@ func main() {
 		"DELETE /api/settings/tokens":     handleTokenDelete,
 		"POST /api/apps/{name}/domains":   handleDomainsMod,
 		"PUT /api/apps/{name}/source":     handleSourceSet,
-		"POST /api/apps/{name}/ssl":       handleSSL,
+		"POST /api/apps/{name}/ssl":         handleSSL,
+		"POST /api/apps/{name}/maintenance": handleMaintenance,
+		"GET /api/maintenance/preview":      handleMaintenancePreview,
 		"POST /api/settings/password":     handleChangePassword,
 		"POST /api/settings/totp/setup":   handleTOTPSetup,
 		"POST /api/settings/totp/verify":  handleTOTPVerify,
@@ -128,6 +130,7 @@ func main() {
 		"POST /api/apps/{name}/restore":      handleAppRestore,
 		"POST /api/settings/s3":              handleS3Set,
 		"POST /api/settings/webhook":         handleWebhookSet,
+		"POST /api/settings/timezone":        handleDisplayTZSet,
 		"GET /api/audit":                     handleAudit,
 	}
 	for p, h := range protected {

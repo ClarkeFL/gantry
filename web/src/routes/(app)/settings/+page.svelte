@@ -8,10 +8,48 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Card from '$lib/components/ui/card';
 	import { fmtDate, fmtLogLine } from '$lib/dates';
+	import {
+		displayPrefs,
+		browserTzName,
+		serverInfo,
+		serverTzLabel,
+		userTzLabel,
+		userTzFull,
+		userTzName
+	} from '$lib/server-info.svelte';
+	import InfoTip from '$lib/components/info-tip.svelte';
+
+	// Common IANA zones for the schedule UI. "Auto" uses the browser zone.
+	const TIMEZONES: { value: string; label: string }[] = [
+		{ value: '', label: 'Auto (browser)' },
+		{ value: 'UTC', label: 'UTC' },
+		{ value: 'Pacific/Honolulu', label: 'Hawaii (HST)' },
+		{ value: 'America/Los_Angeles', label: 'US Pacific' },
+		{ value: 'America/Denver', label: 'US Mountain' },
+		{ value: 'America/Chicago', label: 'US Central' },
+		{ value: 'America/New_York', label: 'US Eastern' },
+		{ value: 'America/Sao_Paulo', label: 'São Paulo' },
+		{ value: 'Europe/London', label: 'London' },
+		{ value: 'Europe/Paris', label: 'Paris / Berlin' },
+		{ value: 'Europe/Athens', label: 'Athens / Eastern Europe' },
+		{ value: 'Africa/Johannesburg', label: 'Johannesburg' },
+		{ value: 'Asia/Dubai', label: 'Dubai' },
+		{ value: 'Asia/Kolkata', label: 'India' },
+		{ value: 'Asia/Singapore', label: 'Singapore' },
+		{ value: 'Asia/Tokyo', label: 'Tokyo' },
+		{ value: 'Australia/Perth', label: 'Perth (AWST)' },
+		{ value: 'Australia/Adelaide', label: 'Adelaide (ACST/ACDT)' },
+		{ value: 'Australia/Sydney', label: 'Sydney / Melbourne (AEST/AEDT)' },
+		{ value: 'Pacific/Auckland', label: 'Auckland' }
+	];
 
 	let githubUser = $state('');
 	let githubTokenMasked = $state('');
 	let qrBust = $state(0);
+
+	// timezone preference
+	let displayTz = $state('');
+	let savingTz = $state(false);
 
 	// password change
 	let curPw = $state('');
@@ -127,8 +165,31 @@
 		tokens = s.tokens ?? [];
 		recoveryLeft = s.recoveryLeft ?? 0;
 		alertWebhook = s.alertWebhook ?? '';
+		displayTz = s.displayTz ?? '';
+		displayPrefs.tz = displayTz;
 		loadAudit().catch(() => {});
 	});
+
+	async function saveTimezone(e: SubmitEvent) {
+		e.preventDefault();
+		savingTz = true;
+		try {
+			await api('/settings/timezone', {
+				method: 'POST',
+				body: JSON.stringify({ tz: displayTz })
+			});
+			displayPrefs.tz = displayTz;
+			toast.success(
+				displayTz
+					? `Schedules will use ${userTzFull()}`
+					: `Schedules will use your browser timezone (${userTzFull()})`
+			);
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			savingTz = false;
+		}
+	}
 
 	async function saveSessionDays(e: SubmitEvent) {
 		e.preventDefault();
@@ -336,6 +397,49 @@
 			{:else}
 				<Button class="w-fit" onclick={startTotpSetup} disabled={totpBusy}>Enable two-factor authentication</Button>
 			{/if}
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="flex items-center gap-1.5 text-base">
+				Your timezone
+				<InfoTip
+					text={`Backup and job schedules run on the server clock. Set your timezone so time pickers mean your local time, and we convert to the server automatically. Server is currently ${serverTzLabel() || 'unknown'}.`}
+				/>
+			</Card.Title>
+			<Card.Description>
+				Used for every schedule picker and timestamp across the panel. Cron still runs on the
+				server{#if serverInfo.known}
+					{' '}({serverTzLabel()}).
+				{:else}
+					.
+				{/if}
+			</Card.Description>
+		</Card.Header>
+		<Card.Content>
+			<form onsubmit={saveTimezone} class="flex max-w-md flex-wrap items-center gap-2">
+				<select
+					class="border-input dark:bg-input/30 h-9 min-w-56 flex-1 rounded-md border bg-transparent px-2.5 text-sm shadow-xs"
+					bind:value={displayTz}
+					aria-label="Your timezone"
+				>
+					{#each TIMEZONES as z (z.value || 'auto')}
+						<option value={z.value}>
+							{z.label}{z.value === '' ? ` · ${browserTzName()}` : ''}
+						</option>
+					{/each}
+				</select>
+				<Button type="submit" variant="outline" disabled={savingTz}>
+					{savingTz ? 'Saving…' : 'Save'}
+				</Button>
+			</form>
+			<p class="text-muted-foreground mt-2 text-xs">
+				Active: <span class="text-foreground font-medium">{userTzFull()}</span>
+				{#if !displayTz}
+					<span class="opacity-70">(from this browser · {userTzName()})</span>
+				{/if}
+			</p>
 		</Card.Content>
 	</Card.Root>
 
