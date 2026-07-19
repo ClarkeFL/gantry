@@ -7,7 +7,6 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { toast } from 'svelte-sonner';
-	import AnchorIcon from '@lucide/svelte/icons/anchor';
 	import GaugeIcon from '@lucide/svelte/icons/gauge';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import DatabaseIcon from '@lucide/svelte/icons/database';
@@ -84,7 +83,10 @@
 	<div class="min-h-svh">
 		<aside class="bg-card fixed inset-y-0 flex w-56 flex-col border-r">
 			<div class="flex items-center gap-2 px-4 py-5">
-				<AnchorIcon class="text-primary size-5" />
+				<svg class="text-primary size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+					<path d="M3 7h18" /><path d="M5.5 7v13" /><path d="M18.5 7v13" /><path d="M12 7v4" />
+					<rect x="8.5" y="11" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
+				</svg>
 				<span class="text-lg font-semibold tracking-tight">gantry</span>
 				{#if mock}
 					<span class="ml-auto rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-500">

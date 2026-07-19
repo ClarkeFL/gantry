@@ -674,8 +674,9 @@
 					<Card.Header>
 						<Card.Title class="text-base">Scheduled jobs</Card.Title>
 						<Card.Description>
-							Each job runs in a fresh one-off container of this app (<code>dokku --rm run {d.name} …</code>),
-							0MB between runs. Editable live, no redeploy.
+							Run commands automatically on a schedule, like nightly cleanups or report scripts.
+							Each run starts a fresh copy of {d.name}, runs the command, and exits. Changes apply
+							as soon as you save, no redeploy needed.
 						</Card.Description>
 					</Card.Header>
 					<Card.Content class="grid gap-2">

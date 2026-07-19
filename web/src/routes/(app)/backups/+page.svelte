@@ -13,7 +13,7 @@
 	import BoxIcon from '@lucide/svelte/icons/box';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import CronInput from '$lib/components/cron-input.svelte';
-	import { fmtLogLine } from '$lib/dates';
+	import { fmtDate } from '$lib/dates';
 	import ArchiveRestoreIcon from '@lucide/svelte/icons/archive-restore';
 
 	type Db = { type: string; name: string; schedule: string };
@@ -40,6 +40,18 @@
 	let serverKeep = $state(7);
 	let lastBackup = $state('');
 	let savingServer = $state(false);
+
+	const lastParsed = $derived.by(() => {
+		if (!lastBackup) return null;
+		const m = lastBackup.match(/^(\S+)\s+(ok|failed:?)\s*(.*)$/);
+		if (!m) return { when: lastBackup, ok: null as boolean | null, detail: '' };
+		const size = m[3].match(/\((\d+) KB/)?.[1];
+		return {
+			when: fmtDate(m[1]),
+			ok: m[2] === 'ok',
+			detail: m[2] === 'ok' ? (size ? `${size} KB` : '') : m[3]
+		};
+	});
 
 	async function saveServerSchedule(e: SubmitEvent) {
 		e.preventDefault();
@@ -343,8 +355,15 @@
 					</Button>
 				</div>
 			</form>
-			{#if lastBackup}
-				<p class="text-muted-foreground text-xs">Last backup: {fmtLogLine(lastBackup)}</p>
+			{#if lastParsed}
+				<p class="text-muted-foreground flex items-center gap-1.5 text-xs">
+					Last backup: {lastParsed.when}
+					{#if lastParsed.ok === true}
+						<span class="text-emerald-500">succeeded</span>{#if lastParsed.detail}<span>({lastParsed.detail})</span>{/if}
+					{:else if lastParsed.ok === false}
+						<span class="text-red-500">failed</span> {lastParsed.detail}
+					{/if}
+				</p>
 			{/if}
 			{#if !s3Set}
 				<p class="text-muted-foreground text-sm">Configure S3 storage above first.</p>
