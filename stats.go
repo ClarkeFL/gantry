@@ -208,12 +208,19 @@ func containerStats() []appStat {
 		return []appStat{}
 	}
 	stats := []appStat{}
+	seen := map[string]bool{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(line, "\t")
 		if len(f) != 3 {
 			continue
 		}
+		// during a restart the draining old container briefly coexists with
+		// its replacement; one row per app, or the UI gets duplicate keys
 		app, _, _ := strings.Cut(f[0], ".")
+		if seen[app] {
+			continue
+		}
+		seen[app] = true
 		stats = append(stats, appStat{app, f[1], f[2]})
 	}
 	return stats

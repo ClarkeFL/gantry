@@ -143,7 +143,7 @@
 						</Table.Row>
 					</Table.Header>
 					<Table.Body>
-						{#each s.apps as a (a.app)}
+						{#each s.apps as a, i (a.app + i)}
 							<Table.Row>
 								<Table.Cell><a class="hover:underline" href="/app/{a.app}">{a.app}</a></Table.Cell>
 								<Table.Cell class="font-mono text-xs tabular-nums">{a.cpu}</Table.Cell>
