@@ -24,7 +24,9 @@ What it does, in order:
 2. Downloads the latest `gantry-linux-<arch>` release binary to `/usr/local/bin/gantry`
 3. Installs a systemd service: starts on boot, restarts on crash (and after self-update)
 
-Then open `http://<server-ip>:8022`, **create your admin account** (email + password —
+Then open `https://<server-ip>:8022` — the panel serves HTTPS with a self-signed
+certificate, so your browser warns once (accept it; plain `http://` redirects there
+automatically). **Create your admin account** (email + password —
 registration is only possible while no account exists), and **enable 2FA in Settings**
 (scan the QR, confirm a code). Login is two-step: email + password, then the 6-digit code.
 

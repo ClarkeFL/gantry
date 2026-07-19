@@ -114,6 +114,11 @@ func main() {
 	mux.Handle("/", spaHandler())
 
 	addr := env("GANTRY_ADDR", ":8022")
+	useTLS := env("GANTRY_TLS", map[bool]string{true: "0", false: "1"}[mockMode]) == "1"
+	if useTLS {
+		log.Printf("gantry %s listening on %s (mock=%v)", version, addr, mockMode)
+		log.Fatal(serveDual(addr, mux))
+	}
 	log.Printf("gantry %s listening on %s (mock=%v)", version, addr, mockMode)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }
