@@ -149,18 +149,29 @@
 		}
 	}
 
-	async function saveSchedule(db: Db) {
-		const schedule = (schedules[db.type + '/' + db.name] ?? '').trim();
-		try {
-			await api('/services/backup/schedule', {
-				method: 'POST',
-				body: JSON.stringify({ type: db.type, name: db.name, schedule })
-			});
-			toast.success(schedule ? `Scheduled ${db.name}: ${schedule}` : `Schedule removed for ${db.name}`);
-			await load();
-		} catch (e) {
-			toast.error(msg(e));
-		}
+	// schedule changes save themselves, debounced, with a quiet inline indicator
+	let saveState = $state<Record<string, string>>({});
+	const saveTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+
+	function scheduleChanged(db: Db) {
+		const key = db.type + '/' + db.name;
+		clearTimeout(saveTimers[key]);
+		saveTimers[key] = setTimeout(async () => {
+			saveState[key] = 'saving';
+			try {
+				await api('/services/backup/schedule', {
+					method: 'POST',
+					body: JSON.stringify({ type: db.type, name: db.name, schedule: (schedules[key] ?? '').trim() })
+				});
+				saveState[key] = 'saved';
+				setTimeout(() => {
+					if (saveState[key] === 'saved') saveState[key] = '';
+				}, 2500);
+			} catch (e) {
+				saveState[key] = '';
+				toast.error(msg(e));
+			}
+		}, 700);
 	}
 
 	// restore-an-app dialog
@@ -416,21 +427,22 @@
 				<p class="text-muted-foreground text-sm">No databases yet, create one on the Databases page.</p>
 			{/if}
 			{#each dbs as db (db.type + db.name)}
+				{@const key = db.type + '/' + db.name}
 				<div class="grid gap-2.5 rounded-md border p-3">
 					<div class="flex items-center gap-2">
 						<DatabaseIcon class="text-muted-foreground size-4" />
 						<span class="text-sm font-medium">{db.name}</span>
 						<Badge variant="secondary">{db.type}</Badge>
-						<Button size="sm" class="ml-auto" onclick={() => backupNow(db)} disabled={!s3Set}>
+						<span class="ml-auto text-xs {saveState[key] === 'saved' ? 'text-emerald-500' : 'text-muted-foreground'}">
+							{saveState[key] === 'saving' ? 'Saving…' : saveState[key] === 'saved' ? 'Schedule saved' : ''}
+						</span>
+						<Button size="sm" onclick={() => backupNow(db)} disabled={!s3Set}>
 							<CloudUploadIcon class="size-4" /> Backup now
 						</Button>
 					</div>
-					<div class="flex flex-wrap items-end gap-2">
-						<CronInput bind:value={schedules[db.type + '/' + db.name]} allowEmpty />
-						<Button size="sm" variant="outline" onclick={() => saveSchedule(db)} disabled={!s3Set}>
-							Save schedule
-						</Button>
-					</div>
+					{#if s3Set}
+						<CronInput compact bind:value={schedules[key]} allowEmpty onchange={() => scheduleChanged(db)} />
+					{/if}
 				</div>
 			{/each}
 			{#if !s3Set && dbs.length}

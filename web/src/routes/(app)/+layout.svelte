@@ -14,6 +14,8 @@
 	import ArchiveIcon from '@lucide/svelte/icons/archive';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import CopyIcon from '@lucide/svelte/icons/copy';
+	import ClockIcon from '@lucide/svelte/icons/clock';
+	import { serverInfo, serverClock } from '$lib/server-info.svelte';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -35,6 +37,8 @@
 	];
 
 	let serverIp = $state('');
+	let serverTime = $state('');
+	let clockTimer: ReturnType<typeof setInterval> | undefined;
 
 	onMount(async () => {
 		try {
@@ -46,6 +50,11 @@
 			version = me.version;
 			mock = me.mock;
 			serverIp = me.ip ?? '';
+			serverInfo.tz = me.tz ?? '';
+			serverInfo.tzOffsetMin = me.tzOffsetMin ?? 0;
+			serverInfo.known = me.tz != null;
+			serverTime = serverClock();
+			clockTimer = setInterval(() => (serverTime = serverClock()), 15000);
 			ready = true;
 			const check = await api('/update/check');
 			latest = check.latest;
@@ -127,6 +136,15 @@
 						<CopyIcon class="size-3.5 shrink-0" />
 						{serverIp}
 					</button>
+				{/if}
+				{#if serverTime}
+					<div
+						class="text-muted-foreground flex items-center gap-2 px-3 py-1 text-xs"
+						title="The server's clock. Schedules run on this time."
+					>
+						<ClockIcon class="size-3.5 shrink-0" />
+						Server time {serverTime}{serverInfo.tz ? ` (${serverInfo.tz})` : ''}
+					</div>
 				{/if}
 				{#if updateAvailable}
 					<Button

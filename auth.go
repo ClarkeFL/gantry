@@ -429,5 +429,9 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	if mockMode {
 		ip = "203.0.113.10"
 	}
-	writeJSON(w, map[string]any{"authed": true, "version": version, "mock": mockMode, "ip": ip})
+	zone, offset := time.Now().Zone()
+	writeJSON(w, map[string]any{
+		"authed": true, "version": version, "mock": mockMode, "ip": ip,
+		"tz": zone, "tzOffsetMin": offset / 60,
+	})
 }

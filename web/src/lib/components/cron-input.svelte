@@ -4,8 +4,12 @@
 	// shows the generated schedule and a plain-English summary.
 	let {
 		value = $bindable(''),
-		allowEmpty = false
-	}: { value?: string; allowEmpty?: boolean } = $props();
+		allowEmpty = false,
+		compact = false,
+		onchange
+	}: { value?: string; allowEmpty?: boolean; compact?: boolean; onchange?: () => void } = $props();
+
+	import { serverInfo, browserOffsetMin } from '$lib/server-info.svelte';
 
 	const DAYS: [string, string][] = [
 		['1', 'Monday'],
@@ -60,6 +64,7 @@
 		if (mode === 'custom' && !custom.trim() && lastEmitted) custom = lastEmitted;
 		lastEmitted = build();
 		value = lastEmitted;
+		onchange?.();
 	}
 
 	function parse(v: string) {
@@ -98,6 +103,17 @@
 		}
 	});
 
+	// schedules run on the server's clock; when the viewer is in a different
+	// timezone, show their local equivalent next to the picked time
+	const tzHint = $derived.by(() => {
+		if (!serverInfo.known) return '';
+		const diff = browserOffsetMin() - serverInfo.tzOffsetMin;
+		if (diff === 0) return '';
+		const [h, m] = hm();
+		const total = (h * 60 + m + diff + 2880) % 1440;
+		return ` server time (${pad(Math.floor(total / 60))}:${pad(total % 60)} your time)`;
+	});
+
 	const summary = $derived.by(() => {
 		const [h, m] = hm();
 		const t = pad(h) + ':' + pad(m);
@@ -109,11 +125,11 @@
 			case 'hourly':
 				return 'Runs every hour, on the hour';
 			case 'daily':
-				return `Runs every day at ${t}`;
+				return `Runs every day at ${t}${tzHint}`;
 			case 'weekly':
-				return `Runs every ${DAYS.find((d) => d[0] === weekday)?.[1]} at ${t}`;
+				return `Runs every ${DAYS.find((d) => d[0] === weekday)?.[1]} at ${t}${tzHint}`;
 			case 'monthly':
-				return `Runs on day ${monthday} of every month at ${t}`;
+				return `Runs on day ${monthday} of every month at ${t}${tzHint}`;
 			default:
 				return custom.trim().split(/\s+/).length === 5
 					? 'Custom schedule'
@@ -172,6 +188,6 @@
 		{/if}
 	</div>
 	<p class="text-muted-foreground text-xs">
-		{summary}{#if mode !== 'off' && mode !== 'custom'}<span class="ml-1.5 font-mono opacity-60">{build()}</span>{/if}
+		{summary}{#if !compact && mode !== 'off' && mode !== 'custom'}<span class="ml-1.5 font-mono opacity-60">{build()}</span>{/if}
 	</p>
 </div>
