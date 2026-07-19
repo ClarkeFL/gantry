@@ -10,10 +10,13 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import DatabaseIcon from '@lucide/svelte/icons/database';
 	import CloudUploadIcon from '@lucide/svelte/icons/cloud-upload';
+	import BoxIcon from '@lucide/svelte/icons/box';
+	import DownloadIcon from '@lucide/svelte/icons/download';
 
 	type Db = { type: string; name: string; schedule: string };
 
 	let dbs = $state<Db[]>([]);
+	let appNames = $state<string[]>([]);
 	let s3Set = $state(false);
 	let bucket = $state('');
 	let loading = $state(true);
@@ -99,6 +102,8 @@
 			s3Bucket = s.s3.bucket ?? '';
 			s3Region = s.s3.region ?? '';
 			s3Endpoint = s.s3.endpoint ?? '';
+			const a = await api('/apps');
+			appNames = (a.apps ?? []).map((x: { name: string }) => x.name);
 		} finally {
 			loading = false;
 		}
@@ -138,6 +143,34 @@
 			});
 			toast.success(schedule ? `Scheduled ${db.name}: ${schedule}` : `Schedule removed for ${db.name}`);
 			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		}
+	}
+
+	async function exportApp(name: string) {
+		try {
+			const d = await api('/apps/' + name);
+			const def = {
+				name,
+				env: d.env,
+				domains: (d.domains ?? []).map((x: { name: string }) => x.name),
+				repo: d.repo,
+				ref: d.ref,
+				buildDir: d.buildDir,
+				dockerfile: d.dockerfile,
+				image: d.image,
+				cron: d.jobs,
+				category: d.category
+			};
+			const url = URL.createObjectURL(
+				new Blob([JSON.stringify(def, null, 2)], { type: 'application/json' })
+			);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `gantry-app-${name}.json`;
+			a.click();
+			URL.revokeObjectURL(url);
 		} catch (e) {
 			toast.error(msg(e));
 		}
@@ -241,6 +274,33 @@
 			{#if !s3Set}
 				<p class="text-muted-foreground text-sm">Configure S3 storage above first.</p>
 			{/if}
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="text-base">App backups</Card.Title>
+			<Card.Description>
+				Every server backup above already includes each app's full definition — deploy source,
+				environment variables, domains, cron jobs and category. The app itself rebuilds from its
+				repo or image on deploy, so that definition is all a restore needs. You can also download
+				a single app's definition here.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content class="grid gap-2">
+			{#if !appNames.length && !loading}
+				<p class="text-muted-foreground text-sm">No apps yet.</p>
+			{/if}
+			{#each appNames as name (name)}
+				<div class="flex items-center gap-3 rounded-md border px-3 py-2">
+					<BoxIcon class="text-muted-foreground size-4" />
+					<span class="text-sm font-medium">{name}</span>
+					<Badge variant="outline" class="text-xs">in server backup</Badge>
+					<Button size="sm" variant="outline" class="ml-auto" onclick={() => exportApp(name)}>
+						<DownloadIcon class="size-4" /> Download definition
+					</Button>
+				</div>
+			{/each}
 		</Card.Content>
 	</Card.Root>
 
