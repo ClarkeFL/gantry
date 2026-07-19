@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1383,8 +1384,41 @@ func handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"current":   version,
 		"latest":    latest,
-		"available": latest != "" && latest != version,
+		"available": latest != "" && newerVersion(latest, version),
 	})
+}
+
+// newerVersion reports whether latest is strictly newer than current.
+// Non-semver values (e.g. a "dev" build) fall back to plain inequality so
+// local builds still see updates.
+func newerVersion(latest, current string) bool {
+	pl, ok1 := verParts(latest)
+	pc, ok2 := verParts(current)
+	if !ok1 || !ok2 {
+		return latest != current
+	}
+	for i := range 3 {
+		if pl[i] != pc[i] {
+			return pl[i] > pc[i]
+		}
+	}
+	return false
+}
+
+func verParts(v string) ([3]int, bool) {
+	var p [3]int
+	seg := strings.Split(strings.TrimPrefix(strings.TrimSpace(v), "v"), ".")
+	if len(seg) != 3 {
+		return p, false
+	}
+	for i, s := range seg {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return p, false
+		}
+		p[i] = n
+	}
+	return p, true
 }
 
 func handleUpdate(w http.ResponseWriter, r *http.Request) {

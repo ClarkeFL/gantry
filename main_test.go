@@ -81,3 +81,22 @@ func TestBackupRestoreRoundtrip(t *testing.T) {
 		t.Fatal("backuplog should be excluded from archives")
 	}
 }
+
+func TestNewerVersion(t *testing.T) {
+	cases := []struct {
+		latest, current string
+		want            bool
+	}{
+		{"v0.11.0", "v0.12.0", false}, // never offer a downgrade
+		{"v0.12.0", "v0.12.0", false},
+		{"v0.12.1", "v0.12.0", true},
+		{"v1.0.0", "v0.99.9", true},
+		{"v0.9.1", "v0.12.0", false}, // numeric, not alphabetic, compare
+		{"v0.12.0", "dev", true},     // dev builds always see releases
+	}
+	for _, c := range cases {
+		if got := newerVersion(c.latest, c.current); got != c.want {
+			t.Errorf("newerVersion(%q, %q) = %v, want %v", c.latest, c.current, got, c.want)
+		}
+	}
+}
