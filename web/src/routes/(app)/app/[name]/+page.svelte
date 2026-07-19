@@ -8,6 +8,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import CronInput from '$lib/components/cron-input.svelte';
+	import { ago, fmtDate } from '$lib/dates';
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Skeleton } from '$lib/components/ui/skeleton';
@@ -378,7 +379,7 @@
 	function lastBadge(last?: string): { label: string; ok: boolean } | null {
 		if (!last) return null;
 		const [ts] = last.split(' ');
-		return { label: `${last.includes('exit=0') ? 'ok' : 'failed'} · ${ts.replace('T', ' ').slice(0, 16)}`, ok: last.includes('exit=0') };
+		return { label: `${last.includes('exit=0') ? 'ok' : 'failed'} · ${ago(ts)}`, ok: last.includes('exit=0') };
 	}
 </script>
 
@@ -394,7 +395,7 @@
 			<h1 class="text-2xl font-semibold tracking-tight">{d.name}</h1>
 			<Badge variant={d.running ? 'default' : 'destructive'}>{d.running ? 'running' : 'stopped'}</Badge>
 			{#if d.lastDeploy && !d.lastDeployOk}
-				<Badge variant="destructive" title={d.lastDeploy}>last deploy failed</Badge>
+				<Badge variant="destructive" title={fmtDate(d.lastDeploy)}>last deploy failed · {ago(d.lastDeploy)}</Badge>
 			{/if}
 			<div class="ml-auto flex gap-2">
 				{#if d.running}

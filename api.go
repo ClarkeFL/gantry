@@ -1,8 +1,14 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"fmt"
 	"net"
 	"net/http"
@@ -397,6 +403,207 @@ func handleServiceLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// --- per-app restore: reapply one app's definition from a file or an S3 archive ---
+
+type appRestoreDef struct {
+	Name       string            `json:"name"`
+	Env        map[string]string `json:"env"`
+	Domains    []string          `json:"domains"`
+	Repo       string            `json:"repo"`
+	Ref        string            `json:"ref"`
+	BuildDir   string            `json:"buildDir"`
+	Dockerfile string            `json:"dockerfile"`
+	Image      string            `json:"image"`
+	Cron       []cronJob         `json:"cron"`
+	Category   string            `json:"category"`
+}
+
+func applyAppRestore(name string, def appRestoreDef) error {
+	dokku("apps:create", name) // no-op if it already exists
+	if len(def.Env) > 0 {
+		args := []string{"config:set", "--no-restart", name}
+		for k, v := range def.Env {
+			if keyRe.MatchString(k) {
+				args = append(args, k+"="+v)
+			}
+		}
+		if len(args) > 3 {
+			if out, err := dokku(args...); err != nil {
+				return fmt.Errorf("env restore failed: %s", out)
+			}
+		}
+	}
+	existing, _ := dokku("domains:report", name, "--domains-app-vhosts")
+	have := map[string]bool{}
+	for _, d := range strings.Fields(existing) {
+		have[d] = true
+	}
+	for _, d := range def.Domains {
+		if domainRe.MatchString(d) && !have[d] {
+			dokku("domains:add", name, d)
+		}
+	}
+	if def.BuildDir != "" {
+		dokku("builder:set", name, "build-dir", def.BuildDir)
+	}
+	if def.Dockerfile != "" {
+		dokku("builder-dockerfile:set", name, "dockerfile-path", def.Dockerfile)
+	}
+	metaMu.Lock()
+	m := getMeta(name)
+	m.Repo, m.Ref, m.BuildDir, m.Dockerfile, m.Image = def.Repo, def.Ref, def.BuildDir, def.Dockerfile, def.Image
+	m.Category = def.Category
+	jobs := []cronJob{}
+	for _, j := range def.Cron {
+		if validSchedule(j.Schedule) && j.Command != "" {
+			if j.ID == "" {
+				b := make([]byte, 4)
+				rand.Read(b)
+				j.ID = hex.EncodeToString(b)
+			}
+			jobs = append(jobs, cronJob{ID: j.ID, Schedule: j.Schedule, Command: j.Command})
+		}
+	}
+	m.Jobs = jobs
+	saveMeta()
+	metaMu.Unlock()
+	return writeCronFile(name, jobs)
+}
+
+// defFromArchive digs one app's definition out of a server backup archive.
+func defFromArchive(archive []byte, name string) (appRestoreDef, error) {
+	def := appRestoreDef{Name: name}
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		return def, err
+	}
+	tr := tar.NewReader(gz)
+	found := false
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			break
+		}
+		switch filepath.ToSlash(hdr.Name) {
+		case "apps.json":
+			var apps []appBackup
+			b, _ := io.ReadAll(tr)
+			json.Unmarshal(b, &apps)
+			for _, a := range apps {
+				if a.Name == name {
+					def.Env, def.Domains = a.Env, a.Domains
+					found = true
+				}
+			}
+		case "state/meta.json":
+			var metas map[string]*appMeta
+			b, _ := io.ReadAll(tr)
+			json.Unmarshal(b, &metas)
+			if m := metas[name]; m != nil {
+				def.Repo, def.Ref, def.BuildDir, def.Dockerfile, def.Image = m.Repo, m.Ref, m.BuildDir, m.Dockerfile, m.Image
+				def.Cron, def.Category = m.Jobs, m.Category
+			}
+		}
+	}
+	if !found {
+		return def, fmt.Errorf("app %q not found in that backup", name)
+	}
+	return def, nil
+}
+
+func handleBackupArchiveList(w http.ResponseWriter, r *http.Request) {
+	if mockMode {
+		writeJSON(w, map[string]any{"keys": []string{"gantry/panel-20260719-040000.tar.gz", "gantry/panel-20260718-040000.tar.gz"}})
+		return
+	}
+	keys, err := s3List("gantry/panel-")
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	// newest first
+	for i, j := 0, len(keys)-1; i < j; i, j = i+1, j-1 {
+		keys[i], keys[j] = keys[j], keys[i]
+	}
+	writeJSON(w, map[string]any{"keys": keys})
+}
+
+func handleBackupArchiveApps(w http.ResponseWriter, r *http.Request) {
+	key := r.URL.Query().Get("key")
+	if mockMode {
+		writeJSON(w, map[string]any{"apps": []string{"api", "blog", "landing"}})
+		return
+	}
+	archive, err := s3Get(key)
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	names := []string{}
+	if gz, err := gzip.NewReader(bytes.NewReader(archive)); err == nil {
+		tr := tar.NewReader(gz)
+		for {
+			hdr, err := tr.Next()
+			if err != nil {
+				break
+			}
+			if filepath.ToSlash(hdr.Name) == "apps.json" {
+				var apps []appBackup
+				b, _ := io.ReadAll(tr)
+				json.Unmarshal(b, &apps)
+				for _, a := range apps {
+					names = append(names, a.Name)
+				}
+			}
+		}
+	}
+	writeJSON(w, map[string]any{"apps": names})
+}
+
+func handleAppRestore(w http.ResponseWriter, r *http.Request) {
+	name, ok := appName(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Key string        `json:"key"`
+		Def *appRestoreDef `json:"def"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	var def appRestoreDef
+	switch {
+	case req.Def != nil:
+		def = *req.Def
+	case req.Key != "":
+		if mockMode {
+			// pretend the archive holds the app's current definition
+			def = appRestoreDef{Name: name}
+		} else {
+			archive, err := s3Get(req.Key)
+			if err != nil {
+				httpErr(w, 500, err.Error())
+				return
+			}
+			def, err = defFromArchive(archive, name)
+			if err != nil {
+				httpErr(w, 404, err.Error())
+				return
+			}
+		}
+	default:
+		httpErr(w, 400, "provide a backup key or a definition")
+		return
+	}
+	if err := applyAppRestore(name, def); err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "env": len(def.Env), "domains": len(def.Domains)})
 }
 
 // --- database backups to S3 via dokku's <plugin>:backup ---

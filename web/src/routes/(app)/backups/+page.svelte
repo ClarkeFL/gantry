@@ -13,6 +13,8 @@
 	import BoxIcon from '@lucide/svelte/icons/box';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import CronInput from '$lib/components/cron-input.svelte';
+	import { fmtLogLine } from '$lib/dates';
+	import ArchiveRestoreIcon from '@lucide/svelte/icons/archive-restore';
 
 	type Db = { type: string; name: string; schedule: string };
 
@@ -149,6 +151,77 @@
 		}
 	}
 
+	// restore-an-app dialog
+	let restoreOpen = $state(false);
+	let restoreKeys = $state<string[]>([]);
+	let restoreKey = $state('');
+	let restoreApps = $state<string[]>([]);
+	let restoreApp = $state('');
+	let restoreDef = $state<{ name: string } | null>(null);
+	let restoring = $state(false);
+
+	async function openRestore() {
+		restoreDef = null;
+		restoreOpen = true;
+		try {
+			const d = await api('/backup/list');
+			restoreKeys = d.keys ?? [];
+			if (restoreKeys.length) {
+				restoreKey = restoreKeys[0];
+				await loadArchiveApps();
+			}
+		} catch (e) {
+			toast.error(msg(e));
+		}
+	}
+
+	async function loadArchiveApps() {
+		restoreApps = [];
+		try {
+			const d = await api('/backup/apps?key=' + encodeURIComponent(restoreKey));
+			restoreApps = d.apps ?? [];
+			restoreApp = restoreApps[0] ?? '';
+		} catch (e) {
+			toast.error(msg(e));
+		}
+	}
+
+	function onRestoreFile(e: Event) {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (!file) return;
+		file.text().then((text) => {
+			try {
+				const def = JSON.parse(text);
+				if (!def.name) throw new Error('not a gantry app definition');
+				restoreDef = def;
+			} catch {
+				toast.error('That file is not a gantry app definition');
+			}
+		});
+	}
+
+	async function doRestore() {
+		const name = restoreDef?.name ?? restoreApp;
+		if (!name) return;
+		restoring = true;
+		try {
+			const res = await api(`/apps/${name}/restore`, {
+				method: 'POST',
+				body: JSON.stringify(restoreDef ? { def: restoreDef } : { key: restoreKey })
+			});
+			toast.success(
+				`Restored ${name}: ${res.env} env vars, ${res.domains} domains. Open the app and press Deploy to rebuild it.`,
+				{ duration: 8000 }
+			);
+			restoreOpen = false;
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			restoring = false;
+		}
+	}
+
 	async function exportApp(name: string) {
 		try {
 			const d = await api('/apps/' + name);
@@ -248,10 +321,10 @@
 		<Card.Header>
 			<Card.Title class="text-base">Server backup</Card.Title>
 			<Card.Description>
-				One archive of everything that defines this server: panel settings, app sources, env vars,
-				domains, cron jobs and categories. Restore onto a fresh install with
-				<code>gantry restore &lt;file&gt;</code>. Old backups beyond the keep count are deleted
-				automatically.
+				A complete snapshot of how this server is set up: panel settings, plus every app's deploy
+				source, environment variables, domains and scheduled jobs. If this server is ever lost,
+				install gantry on a new one and bring everything back with one command
+				(<code>gantry restore &lt;file&gt;</code>).
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-3">
@@ -271,7 +344,7 @@
 				</div>
 			</form>
 			{#if lastBackup}
-				<p class="text-muted-foreground font-mono text-xs">last: {lastBackup}</p>
+				<p class="text-muted-foreground text-xs">Last backup: {fmtLogLine(lastBackup)}</p>
 			{/if}
 			{#if !s3Set}
 				<p class="text-muted-foreground text-sm">Configure S3 storage above first.</p>
@@ -283,13 +356,18 @@
 		<Card.Header>
 			<Card.Title class="text-base">App backups</Card.Title>
 			<Card.Description>
-				Every server backup above already includes each app's full definition, deploy source,
-				environment variables, domains, cron jobs and category. The app itself rebuilds from its
-				repo or image on deploy, so that definition is all a restore needs. You can also download
-				a single app's definition here.
+				Each app's setup is saved inside every server backup above, and its code lives in its
+				GitHub repo or Docker image, so a restore has everything it needs. Use Restore an app to
+				bring back a single app (for example after deleting one by mistake) without touching the
+				rest of the server, or download an app's setup as a file to keep.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-2">
+			<div>
+				<Button variant="outline" size="sm" onclick={openRestore}>
+					<ArchiveRestoreIcon class="size-4" /> Restore an app
+				</Button>
+			</div>
 			{#if !appNames.length && !loading}
 				<p class="text-muted-foreground text-sm">No apps yet.</p>
 			{/if}
@@ -310,9 +388,8 @@
 		<Card.Header>
 			<Card.Title class="text-base">Database backups</Card.Title>
 			<Card.Description>
-				Backup now, or pick how often each database is dumped to
-				<code>s3://{bucket || 'your-bucket'}</code> automatically. Restore with
-				<code>dokku &lt;type&gt;:import &lt;name&gt; &lt; dump.sql</code>.
+				Saves a copy of each database's data to your storage. Use Backup now for a one-off copy,
+				or set a schedule and it happens automatically.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-2">
@@ -320,20 +397,19 @@
 				<p class="text-muted-foreground text-sm">No databases yet, create one on the Databases page.</p>
 			{/if}
 			{#each dbs as db (db.type + db.name)}
-				<div class="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2">
-					<DatabaseIcon class="text-muted-foreground size-4" />
-					<span class="text-sm font-medium">{db.name}</span>
-					<Badge variant="secondary">{db.type}</Badge>
-					{#if db.schedule}
-						<Badge variant="outline" class="font-mono text-xs">{db.schedule}</Badge>
-					{/if}
-					<div class="ml-auto flex flex-wrap items-start gap-2">
+				<div class="grid gap-2.5 rounded-md border p-3">
+					<div class="flex items-center gap-2">
+						<DatabaseIcon class="text-muted-foreground size-4" />
+						<span class="text-sm font-medium">{db.name}</span>
+						<Badge variant="secondary">{db.type}</Badge>
+						<Button size="sm" class="ml-auto" onclick={() => backupNow(db)} disabled={!s3Set}>
+							<CloudUploadIcon class="size-4" /> Backup now
+						</Button>
+					</div>
+					<div class="flex flex-wrap items-end gap-2">
 						<CronInput bind:value={schedules[db.type + '/' + db.name]} allowEmpty />
 						<Button size="sm" variant="outline" onclick={() => saveSchedule(db)} disabled={!s3Set}>
 							Save schedule
-						</Button>
-						<Button size="sm" onclick={() => backupNow(db)} disabled={!s3Set}>
-							<CloudUploadIcon class="size-4" /> Backup now
 						</Button>
 					</div>
 				</div>
@@ -344,6 +420,53 @@
 		</Card.Content>
 	</Card.Root>
 </div>
+
+<Dialog.Root bind:open={restoreOpen}>
+	<Dialog.Content class="max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Restore an app</Dialog.Title>
+			<Dialog.Description>
+				Pick a server backup and choose which app to bring back, or upload an app file you
+				downloaded earlier. Only that app is changed.
+			</Dialog.Description>
+		</Dialog.Header>
+		<div class="grid gap-4">
+			{#if !restoreDef}
+				<div class="grid gap-1.5">
+					<Label>From backup</Label>
+					<select
+						class="border-input dark:bg-input/30 h-9 rounded-md border bg-transparent px-2.5 text-sm"
+						bind:value={restoreKey}
+						onchange={loadArchiveApps}
+					>
+						{#each restoreKeys as k (k)}<option value={k}>{k.replace('gantry/', '')}</option>{/each}
+					</select>
+				</div>
+				<div class="grid gap-1.5">
+					<Label>App to restore</Label>
+					<select
+						class="border-input dark:bg-input/30 h-9 rounded-md border bg-transparent px-2.5 text-sm"
+						bind:value={restoreApp}
+					>
+						{#each restoreApps as a (a)}<option value={a}>{a}</option>{/each}
+					</select>
+				</div>
+			{:else}
+				<p class="text-sm">
+					From file: restoring <code class="text-foreground">{restoreDef.name}</code>
+					<Button variant="ghost" size="sm" onclick={() => (restoreDef = null)}>Use a backup instead</Button>
+				</p>
+			{/if}
+			<div class="grid gap-1.5">
+				<Label for="restore-file">Or upload an app file</Label>
+				<input id="restore-file" type="file" accept=".json" onchange={onRestoreFile} class="text-sm" />
+			</div>
+			<Button onclick={doRestore} disabled={restoring || (!restoreDef && !restoreApp)}>
+				{restoring ? 'Restoring…' : 'Restore'}
+			</Button>
+		</div>
+	</Dialog.Content>
+</Dialog.Root>
 
 <Dialog.Root bind:open={backupOpen}>
 	<Dialog.Content class="max-w-xl">

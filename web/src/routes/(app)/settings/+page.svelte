@@ -7,6 +7,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Card from '$lib/components/ui/card';
+	import { fmtDate, fmtLogLine } from '$lib/dates';
 
 	let githubUser = $state('');
 	let githubTokenMasked = $state('');
@@ -437,7 +438,7 @@
 					{#each tokens as t (t.name)}
 						<div class="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
 							<span class="font-medium">{t.name}</span>
-							<span class="text-muted-foreground text-xs">created {t.created}</span>
+							<span class="text-muted-foreground text-xs">created {fmtDate(t.created)}</span>
 							<Button size="sm" variant="ghost" class="text-destructive ml-auto" onclick={() => revokeToken(t.name)}>
 								Revoke
 							</Button>
@@ -489,7 +490,7 @@
 		<Card.Content>
 			{#if auditLines.length}
 				<div class="bg-card max-h-64 overflow-y-auto rounded-md border p-3 font-mono text-xs leading-5">
-					{#each auditLines as line, i (i)}<div class="whitespace-pre">{line}</div>{/each}
+					{#each auditLines as line, i (i)}<div class="whitespace-pre">{fmtLogLine(line)}</div>{/each}
 				</div>
 			{:else}
 				<p class="text-muted-foreground text-sm">Nothing yet.</p>
