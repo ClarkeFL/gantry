@@ -32,9 +32,11 @@ func appName(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 type appInfo struct {
-	Name     string `json:"name"`
-	Running  bool   `json:"running"`
-	Category string `json:"category"`
+	Name         string `json:"name"`
+	Running      bool   `json:"running"`
+	Category     string `json:"category"`
+	LastDeploy   string `json:"lastDeploy,omitempty"`
+	LastDeployOK bool   `json:"lastDeployOk"`
 }
 
 func handleApps(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +53,8 @@ func handleApps(w http.ResponseWriter, r *http.Request) {
 			continue // headers and "! You haven't deployed any applications yet"
 		}
 		running, _ := dokku("ps:report", name, "--running")
-		apps = append(apps, appInfo{name, running == "true", getMeta(name).Category})
+		m := getMeta(name)
+		apps = append(apps, appInfo{name, running == "true", m.Category, m.LastDeploy, m.LastDeployOK})
 	}
 	metaMu.Unlock()
 	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
@@ -120,6 +123,7 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	copy(jobs, m.Jobs)
 	category := m.Category
 	repo, ref, buildDir, dockerfile, image := m.Repo, m.Ref, m.BuildDir, m.Dockerfile, m.Image
+	lastDeploy, lastDeployOK := m.LastDeploy, m.LastDeployOK
 	metaMu.Unlock()
 	for i := range jobs {
 		jobs[i].Last = lastRun(name, jobs[i].ID)
@@ -136,9 +140,11 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 		"nativeCron": nativeCron,
 		"repo":       repo,
 		"ref":        ref,
-		"buildDir":   buildDir,
-		"dockerfile": dockerfile,
-		"image":      image,
+		"buildDir":     buildDir,
+		"dockerfile":   dockerfile,
+		"image":        image,
+		"lastDeploy":   lastDeploy,
+		"lastDeployOk": lastDeployOK,
 	})
 }
 
@@ -325,10 +331,11 @@ func handleCronPut(w http.ResponseWriter, r *http.Request) {
 
 func handleServicesGet(w http.ResponseWriter, r *http.Request) {
 	type svcOut struct {
-		Type     string `json:"type"`
-		Name     string `json:"name"`
-		Status   string `json:"status"`
-		Category string `json:"category"`
+		Type     string   `json:"type"`
+		Name     string   `json:"name"`
+		Status   string   `json:"status"`
+		Category string   `json:"category"`
+		Links    []string `json:"links"`
 	}
 	svcs := listServices()
 	settingsMu.Lock()
@@ -347,10 +354,169 @@ func handleServicesGet(w http.ResponseWriter, r *http.Request) {
 			catSet[cat] = true
 			cats = append(cats, cat)
 		}
-		out = append(out, svcOut{s.Type, s.Name, s.Status, cat})
+		out = append(out, svcOut{s.Type, s.Name, s.Status, cat, nil})
 	}
 	settingsMu.Unlock()
+	for i := range out {
+		out[i].Links = serviceLinks(out[i].Type, out[i].Name)
+	}
 	writeJSON(w, map[string]any{"services": out, "categories": cats})
+}
+
+func serviceLinks(t, n string) []string {
+	links := []string{}
+	if txt, err := dokku(t+":links", n); err == nil {
+		for _, line := range strings.Split(txt, "\n") {
+			if line = strings.TrimSpace(line); appRe.MatchString(line) {
+				links = append(links, line)
+			}
+		}
+	}
+	return links
+}
+
+func handleServiceLink(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Type, Name, App string
+		Unlink          bool
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	if !serviceTypes[req.Type] || !appRe.MatchString(req.Name) || !appRe.MatchString(req.App) {
+		httpErr(w, 400, "bad service or app name")
+		return
+	}
+	verb := ":link"
+	if req.Unlink {
+		verb = ":unlink"
+	}
+	if out, err := dokku(req.Type+verb, req.Name, req.App); err != nil {
+		httpErr(w, 500, out)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// --- database backups to S3 via dokku's <plugin>:backup ---
+
+func s3Config() (bucket string, authArgs func(t, n string) []string, ok bool) {
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	if settings.S3Bucket == "" || settings.S3Key == "" || settings.S3Secret == "" {
+		return "", nil, false
+	}
+	key, secret, region, endpoint := settings.S3Key, settings.S3Secret, settings.S3Region, settings.S3Endpoint
+	return settings.S3Bucket, func(t, n string) []string {
+		args := []string{t + ":backup-auth", n, key, secret}
+		if endpoint != "" {
+			if region == "" {
+				region = "us-east-1"
+			}
+			args = append(args, region, "v4", endpoint)
+		} else if region != "" {
+			args = append(args, region)
+		}
+		return args
+	}, true
+}
+
+func handleBackups(w http.ResponseWriter, r *http.Request) {
+	type row struct {
+		Type     string `json:"type"`
+		Name     string `json:"name"`
+		Schedule string `json:"schedule"`
+	}
+	rows := []row{}
+	for _, s := range listServices() {
+		sched := ""
+		if out, err := dokku(s.Type+":backup-schedule-cat", s.Name); err == nil {
+			for _, line := range strings.Split(out, "\n") {
+				f := strings.Fields(line)
+				if len(f) >= 5 && !strings.HasPrefix(f[0], "#") && !strings.HasPrefix(f[0], "=") {
+					sched = strings.Join(f[:5], " ")
+					break
+				}
+			}
+		}
+		rows = append(rows, row{s.Type, s.Name, sched})
+	}
+	bucket, _, s3ok := s3Config()
+	writeJSON(w, map[string]any{"databases": rows, "s3Set": s3ok, "bucket": bucket})
+}
+
+func handleServiceBackup(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Type, Name string }
+	json.NewDecoder(r.Body).Decode(&req)
+	if !serviceTypes[req.Type] || !appRe.MatchString(req.Name) {
+		httpErr(w, 400, "bad service type or name")
+		return
+	}
+	send, ok := sseStart(w)
+	if !ok {
+		return
+	}
+	bucket, authArgs, s3ok := s3Config()
+	if !s3ok {
+		send("[error] configure S3 storage on the Backups page first")
+		return
+	}
+	if mockMode {
+		for _, l := range []string{"[check] backup credentials set", "-----> Backing up " + req.Name + " to s3://" + bucket, "-----> Uploading dump…", "-----> Backup complete"} {
+			send(l)
+			time.Sleep(300 * time.Millisecond)
+		}
+		send("[gantry] done")
+		return
+	}
+	send("[check] setting backup credentials…")
+	if out, err := dokku(authArgs(req.Type, req.Name)...); err != nil {
+		send("[error] backup-auth failed: " + out)
+		return
+	}
+	if err := streamCmd(r.Context(), send, "dokku", req.Type+":backup", req.Name, bucket); err != nil {
+		send("[error] backup failed (" + err.Error() + ") — see output above")
+		go notifyWebhook("gantry: backup failed for " + req.Type + "/" + req.Name)
+		return
+	}
+	send("[gantry] done")
+}
+
+func handleBackupSchedule(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Type, Name, Schedule string }
+	json.NewDecoder(r.Body).Decode(&req)
+	if !serviceTypes[req.Type] || !appRe.MatchString(req.Name) {
+		httpErr(w, 400, "bad service type or name")
+		return
+	}
+	req.Schedule = strings.TrimSpace(req.Schedule)
+	if req.Schedule == "" {
+		if out, err := dokku(req.Type+":backup-unschedule", req.Name); err != nil {
+			httpErr(w, 500, out)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+		return
+	}
+	if !validSchedule(req.Schedule) || strings.HasPrefix(req.Schedule, "@") {
+		httpErr(w, 400, "schedule must be 5 cron fields, e.g. 0 3 * * *")
+		return
+	}
+	bucket, authArgs, s3ok := s3Config()
+	if !s3ok {
+		httpErr(w, 400, "configure S3 storage first")
+		return
+	}
+	if out, err := dokku(authArgs(req.Type, req.Name)...); err != nil {
+		httpErr(w, 500, out)
+		return
+	}
+	if out, err := dokku(req.Type+":backup-schedule", req.Name, req.Schedule, bucket); err != nil {
+		httpErr(w, 500, out)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 func handleAppDestroy(w http.ResponseWriter, r *http.Request) {
@@ -664,6 +830,22 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		req.Repo, req.Ref, req.Dockerfile, req.Image = m.Repo, m.Ref, m.Dockerfile, m.Image
 		metaMu.Unlock()
 	}
+	finish := func(ok bool, detail string) {
+		metaMu.Lock()
+		m := getMeta(name)
+		m.LastDeploy, m.LastDeployOK = time.Now().Format(time.RFC3339), ok
+		saveMeta()
+		metaMu.Unlock()
+		if ok {
+			send("[gantry] done")
+			return
+		}
+		if detail != "" {
+			send("[error] " + detail)
+		}
+		send("[gantry] aborted — nothing was deployed")
+		go notifyWebhook("gantry: deploy failed for " + name + " — " + detail)
+	}
 	if mockMode {
 		src := "last source"
 		if req.Repo != "" {
@@ -684,9 +866,10 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		mockRunning[name] = true
 		saveMockState()
 		mockMu.Unlock()
-		send("[gantry] done")
+		finish(true, "")
 		return
 	}
+	var runErr error
 	switch {
 	case req.Repo != "":
 		url := req.Repo
@@ -710,8 +893,7 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 			if req.Ref != "" && strings.Contains(err.Error(), "exit status 2") {
 				detail = "branch or tag '" + req.Ref + "' not found in the repository"
 			}
-			send("[error] repository check failed: " + detail)
-			send("[gantry] aborted — nothing was deployed")
+			finish(false, "repository check failed: "+detail)
 			return
 		}
 		send("[check] repository ok" + map[bool]string{true: ", branch '" + req.Ref + "' found", false: ""}[req.Ref != ""])
@@ -719,23 +901,26 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		if req.Ref != "" {
 			args = append(args, req.Ref)
 		}
-		streamCmd(r.Context(), send, "dokku", args...)
+		runErr = streamCmd(r.Context(), send, "dokku", args...)
 	case req.Image != "":
 		send("[check] verifying image exists…")
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		out, err := exec.CommandContext(ctx, "docker", "manifest", "inspect", req.Image).CombinedOutput()
 		cancel()
 		if err != nil {
-			send("[error] image check failed: " + strings.TrimSpace(string(out)))
-			send("[gantry] aborted — nothing was deployed")
+			finish(false, "image check failed: "+strings.TrimSpace(string(out)))
 			return
 		}
 		send("[check] image found")
-		streamCmd(r.Context(), send, "dokku", "git:from-image", name, req.Image)
+		runErr = streamCmd(r.Context(), send, "dokku", "git:from-image", name, req.Image)
 	default:
-		streamCmd(r.Context(), send, "dokku", "ps:rebuild", name)
+		runErr = streamCmd(r.Context(), send, "dokku", "ps:rebuild", name)
 	}
-	send("[gantry] done")
+	if runErr != nil {
+		finish(false, "deploy exited with an error ("+runErr.Error()+") — see the output above")
+		return
+	}
+	finish(true, "")
 }
 
 // --- self-update: download latest release binary, swap self, exit; systemd restarts us ---

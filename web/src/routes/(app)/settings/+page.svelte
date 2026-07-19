@@ -26,6 +26,33 @@
 	let disablePw = $state(false);
 	let disablePassword = $state('');
 	let totpBusy = $state(false);
+	let recoveryCodes = $state<string[]>([]);
+	let recoveryLeft = $state(0);
+
+	// alert webhook
+	let alertWebhook = $state('');
+	let savingWebhook = $state(false);
+
+	// audit log
+	let auditLines = $state<string[]>([]);
+
+	async function saveWebhook(e: SubmitEvent) {
+		e.preventDefault();
+		savingWebhook = true;
+		try {
+			await api('/settings/webhook', { method: 'POST', body: JSON.stringify({ url: alertWebhook.trim() }) });
+			toast.success(alertWebhook.trim() ? 'Alerts on' : 'Alerts off');
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			savingWebhook = false;
+		}
+	}
+
+	async function loadAudit() {
+		const d = await api('/audit');
+		auditLines = d.lines ?? [];
+	}
 
 	// github
 	let ghUser = $state('');
@@ -97,6 +124,9 @@
 		pendingSecret = s.pendingSecret ?? '';
 		sessionDays = s.sessionDays ?? 7;
 		tokens = s.tokens ?? [];
+		recoveryLeft = s.recoveryLeft ?? 0;
+		alertWebhook = s.alertWebhook ?? '';
+		loadAudit().catch(() => {});
 	});
 
 	async function saveSessionDays(e: SubmitEvent) {
@@ -131,10 +161,12 @@
 		e.preventDefault();
 		totpBusy = true;
 		try {
-			await api('/settings/totp/verify', { method: 'POST', body: JSON.stringify({ code: verifyCode }) });
+			const res = await api('/settings/totp/verify', { method: 'POST', body: JSON.stringify({ code: verifyCode }) });
 			totpEnabled = true;
 			totpPending = false;
 			pendingSecret = '';
+			recoveryCodes = res.recovery ?? [];
+			recoveryLeft = recoveryCodes.length;
 			toast.success('Two-factor authentication is on — codes required at every login');
 		} catch (e) {
 			toast.error(msg(e));
@@ -266,6 +298,29 @@
 					</div>
 				</div>
 			{:else if totpEnabled}
+				{#if recoveryCodes.length}
+					<div class="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+						<p class="mb-2 text-xs font-medium text-amber-500">
+							Recovery codes — save these somewhere safe now, they won't be shown again. Each works
+							once at login if you lose your authenticator.
+						</p>
+						<div class="grid grid-cols-4 gap-1 font-mono text-xs">
+							{#each recoveryCodes as c (c)}<code class="bg-muted rounded px-1.5 py-1">{c}</code>{/each}
+						</div>
+						<Button
+							size="sm"
+							variant="outline"
+							class="mt-2"
+							onclick={() => {
+								navigator.clipboard.writeText(recoveryCodes.join('\n'));
+								toast.success('Copied');
+							}}>Copy all</Button
+						>
+						<Button size="sm" variant="ghost" class="mt-2" onclick={() => (recoveryCodes = [])}>Done</Button>
+					</div>
+				{:else}
+					<p class="text-muted-foreground text-xs">{recoveryLeft} recovery codes remaining.</p>
+				{/if}
 				{#if disablePw}
 					<form onsubmit={disableTotp} class="flex max-w-sm gap-2">
 						<Input type="password" bind:value={disablePassword} required placeholder="Current password" />
@@ -341,6 +396,22 @@
 
 	<Card.Root>
 		<Card.Header>
+			<Card.Title class="text-base">Alerts</Card.Title>
+			<Card.Description>
+				A Slack or Discord webhook URL — gantry posts there when a deploy or backup fails. Blank
+				turns alerts off.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content>
+			<form onsubmit={saveWebhook} class="flex max-w-lg gap-2">
+				<Input bind:value={alertWebhook} type="url" placeholder="https://hooks.slack.com/services/… or https://discord.com/api/webhooks/…" />
+				<Button type="submit" variant="outline" disabled={savingWebhook}>Save</Button>
+			</form>
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
 			<Card.Title class="text-base">API tokens</Card.Title>
 			<Card.Description>
 				Give AI agents and scripts access to the panel API — create apps and databases, deploy,
@@ -404,6 +475,25 @@
 					{savingGh ? 'Saving…' : 'Save'}
 				</Button>
 			</form>
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="text-base">Audit log</Card.Title>
+			<Card.Description>
+				Every state-changing action, newest first — who (admin session or API token), from where,
+				and what. <button class="underline" onclick={loadAudit}>Refresh</button>
+			</Card.Description>
+		</Card.Header>
+		<Card.Content>
+			{#if auditLines.length}
+				<div class="bg-card max-h-64 overflow-y-auto rounded-md border p-3 font-mono text-xs leading-5">
+					{#each auditLines as line, i (i)}<div class="whitespace-pre">{line}</div>{/each}
+				</div>
+			{:else}
+				<p class="text-muted-foreground text-sm">Nothing yet.</p>
+			{/if}
 		</Card.Content>
 	</Card.Root>
 </div>

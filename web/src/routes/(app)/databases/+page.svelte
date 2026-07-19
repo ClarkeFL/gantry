@@ -18,7 +18,7 @@
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 
-	type Service = { type: string; name: string; status: string; category: string };
+	type Service = { type: string; name: string; status: string; category: string; links: string[] };
 
 	const DB_TYPES = [
 		{ type: 'postgres', label: 'Postgres' },
@@ -30,6 +30,7 @@
 
 	let services = $state<Service[]>([]);
 	let categories = $state<string[]>([]);
+	let appNames = $state<string[]>([]);
 	let loading = $state(true);
 
 	// create dialog
@@ -94,8 +95,25 @@
 			services = d.services ?? [];
 			const cats: string[] = d.categories ?? [];
 			categories = cats.includes('Uncategorised') ? cats : ['Uncategorised', ...cats];
+			const a = await api('/apps');
+			appNames = (a.apps ?? []).map((x: { name: string }) => x.name);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function setLink(s: Service, app: string, unlink: boolean) {
+		try {
+			await api('/services/link', {
+				method: 'POST',
+				body: JSON.stringify({ type: s.type, name: s.name, app, unlink })
+			});
+			toast.success(
+				unlink ? `Unlinked ${app} from ${s.name}` : `Linked ${s.name} to ${app} — its connection URL is now in the app's env`
+			);
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
 		}
 	}
 	onMount(load);
@@ -283,6 +301,34 @@
 									</select>
 								</Card.Description>
 							</Card.Header>
+							<Card.Content class="flex flex-wrap items-center gap-1.5">
+								{#each s.links ?? [] as app (app)}
+									<Badge variant="outline" class="gap-1 font-mono text-xs">
+										{app}
+										<button
+											class="text-muted-foreground hover:text-destructive"
+											onclick={() => setLink(s, app, true)}
+											aria-label="Unlink {app}"
+										>×</button>
+									</Badge>
+								{/each}
+								{#if appNames.filter((a) => !(s.links ?? []).includes(a)).length}
+									<select
+										class="border-input text-muted-foreground h-7 rounded-md border bg-transparent px-2 text-xs"
+										value=""
+										onchange={(e) => {
+											const app = (e.target as HTMLSelectElement).value;
+											if (app) setLink(s, app, false);
+											(e.target as HTMLSelectElement).value = '';
+										}}
+									>
+										<option value="">Link app…</option>
+										{#each appNames.filter((a) => !(s.links ?? []).includes(a)) as a (a)}
+											<option value={a}>{a}</option>
+										{/each}
+									</select>
+								{/if}
+							</Card.Content>
 						</Card.Root>
 					{/each}
 				</div>

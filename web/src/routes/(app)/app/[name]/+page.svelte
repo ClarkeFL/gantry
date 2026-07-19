@@ -41,6 +41,8 @@
 		buildDir: string;
 		dockerfile: string;
 		image: string;
+		lastDeploy: string;
+		lastDeployOk: boolean;
 	};
 
 	const name = $derived(page.params.name!);
@@ -390,6 +392,9 @@
 		<div class="mb-6 flex flex-wrap items-center gap-3">
 			<h1 class="text-2xl font-semibold tracking-tight">{d.name}</h1>
 			<Badge variant={d.running ? 'default' : 'destructive'}>{d.running ? 'running' : 'stopped'}</Badge>
+			{#if d.lastDeploy && !d.lastDeployOk}
+				<Badge variant="destructive" title={d.lastDeploy}>last deploy failed</Badge>
+			{/if}
 			<div class="ml-auto flex gap-2">
 				{#if d.running}
 					<Button variant="outline" size="sm" onclick={() => ps('restart')}>

@@ -1,18 +1,218 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { api, stream } from '$lib/api';
+	import { toast } from 'svelte-sonner';
+	import { Button } from '$lib/components/ui/button';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
 	import * as Card from '$lib/components/ui/card';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import DatabaseIcon from '@lucide/svelte/icons/database';
+	import CloudUploadIcon from '@lucide/svelte/icons/cloud-upload';
+
+	type Db = { type: string; name: string; schedule: string };
+
+	let dbs = $state<Db[]>([]);
+	let s3Set = $state(false);
+	let bucket = $state('');
+	let loading = $state(true);
+
+	// S3 form
+	let s3Bucket = $state('');
+	let s3Region = $state('');
+	let s3Key = $state('');
+	let s3Secret = $state('');
+	let s3Endpoint = $state('');
+	let savingS3 = $state(false);
+
+	// per-row schedule edits
+	let schedules = $state<Record<string, string>>({});
+
+	// backup-now dialog
+	let backupOpen = $state(false);
+	let backupTarget = $state('');
+	let backupLines = $state<string[]>([]);
+	let backingUp = $state(false);
+
+	function msg(e: unknown) {
+		return e instanceof Error ? e.message : String(e);
+	}
+
+	async function load() {
+		loading = true;
+		try {
+			const d = await api('/backups');
+			dbs = d.databases ?? [];
+			s3Set = d.s3Set;
+			bucket = d.bucket ?? '';
+			for (const db of dbs) schedules[db.type + '/' + db.name] = db.schedule;
+			const s = await api('/settings');
+			s3Bucket = s.s3.bucket ?? '';
+			s3Region = s.s3.region ?? '';
+			s3Endpoint = s.s3.endpoint ?? '';
+		} finally {
+			loading = false;
+		}
+	}
+	onMount(load);
+
+	async function saveS3(e: SubmitEvent) {
+		e.preventDefault();
+		savingS3 = true;
+		try {
+			await api('/settings/s3', {
+				method: 'POST',
+				body: JSON.stringify({
+					bucket: s3Bucket,
+					region: s3Region,
+					key: s3Key,
+					secret: s3Secret,
+					endpoint: s3Endpoint
+				})
+			});
+			toast.success('S3 storage saved');
+			s3Key = s3Secret = '';
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			savingS3 = false;
+		}
+	}
+
+	async function saveSchedule(db: Db) {
+		const schedule = (schedules[db.type + '/' + db.name] ?? '').trim();
+		try {
+			await api('/services/backup/schedule', {
+				method: 'POST',
+				body: JSON.stringify({ type: db.type, name: db.name, schedule })
+			});
+			toast.success(schedule ? `Scheduled ${db.name}: ${schedule}` : `Schedule removed for ${db.name}`);
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		}
+	}
+
+	function backupNow(db: Db) {
+		backupTarget = `${db.type}/${db.name}`;
+		backupLines = [];
+		backupOpen = true;
+		backingUp = true;
+		stream(
+			'/services/backup',
+			(l) => {
+				backupLines.push(l);
+			},
+			{ method: 'POST', body: JSON.stringify({ type: db.type, name: db.name }) },
+			() => {
+				backingUp = false;
+			}
+		);
+	}
 </script>
 
-<div class="mx-auto max-w-4xl">
-	<h1 class="mb-6 text-2xl font-semibold tracking-tight">Backups</h1>
+<div class="mx-auto grid max-w-4xl gap-6">
+	<h1 class="text-2xl font-semibold tracking-tight">Backups</h1>
+
 	<Card.Root>
 		<Card.Header>
-			<Card.Title class="text-base">S3 backups are coming in v2</Card.Title>
+			<Card.Title class="flex items-center gap-2 text-base">
+				S3 storage
+				{#if s3Set}
+					<span class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-500">configured</span>
+				{:else}
+					<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-500">not set</span>
+				{/if}
+			</Card.Title>
 			<Card.Description>
-				Until then the cron editor already covers it: add a job to any app like
-				<code>pg_dump $DATABASE_URL | aws s3 cp - s3://bucket/backup-$(date +%F).sql</code> on a
-				<code>@daily</code> schedule. Dokku's database plugins also support
-				<code>dokku postgres:backup-schedule &lt;service&gt; &lt;cron&gt; &lt;bucket&gt;</code> natively.
+				Where database dumps go. Works with AWS S3 or any S3-compatible storage (Backblaze B2,
+				Wasabi, MinIO…) via the endpoint field.
 			</Card.Description>
 		</Card.Header>
+		<Card.Content>
+			<form onsubmit={saveS3} class="grid max-w-lg gap-3">
+				<div class="grid grid-cols-2 gap-3">
+					<div class="grid gap-1">
+						<Label for="s3-bucket">Bucket</Label>
+						<Input id="s3-bucket" bind:value={s3Bucket} required placeholder="my-backups" />
+					</div>
+					<div class="grid gap-1">
+						<Label for="s3-region">Region</Label>
+						<Input id="s3-region" bind:value={s3Region} placeholder="eu-west-2" />
+					</div>
+				</div>
+				<div class="grid grid-cols-2 gap-3">
+					<div class="grid gap-1">
+						<Label for="s3-key">Access key {#if s3Set}<span class="text-muted-foreground">(saved — blank keeps it)</span>{/if}</Label>
+						<Input id="s3-key" bind:value={s3Key} placeholder="AKIA…" autocomplete="off" />
+					</div>
+					<div class="grid gap-1">
+						<Label for="s3-secret">Secret key</Label>
+						<Input id="s3-secret" type="password" bind:value={s3Secret} autocomplete="off" />
+					</div>
+				</div>
+				<div class="grid gap-1">
+					<Label for="s3-endpoint">Endpoint <span class="text-muted-foreground">(optional — non-AWS only)</span></Label>
+					<Input id="s3-endpoint" bind:value={s3Endpoint} placeholder="https://s3.eu-central-003.backblazeb2.com" />
+				</div>
+				<Button type="submit" class="w-fit" disabled={savingS3}>{savingS3 ? 'Saving…' : 'Save'}</Button>
+			</form>
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="text-base">Database backups</Card.Title>
+			<Card.Description>
+				Backup now, or set a cron schedule (e.g. <code>0 3 * * *</code> = 3am daily) and dokku
+				dumps the database to <code>s3://{bucket || 'your-bucket'}</code> automatically. Restore with
+				<code>dokku &lt;type&gt;:import &lt;name&gt; &lt; dump.sql</code>.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content class="grid gap-2">
+			{#if !dbs.length && !loading}
+				<p class="text-muted-foreground text-sm">No databases yet — create one on the Databases page.</p>
+			{/if}
+			{#each dbs as db (db.type + db.name)}
+				<div class="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2">
+					<DatabaseIcon class="text-muted-foreground size-4" />
+					<span class="text-sm font-medium">{db.name}</span>
+					<Badge variant="secondary">{db.type}</Badge>
+					{#if db.schedule}
+						<Badge variant="outline" class="font-mono text-xs">{db.schedule}</Badge>
+					{/if}
+					<div class="ml-auto flex items-center gap-2">
+						<Input
+							bind:value={schedules[db.type + '/' + db.name]}
+							placeholder="0 3 * * *"
+							class="w-32 font-mono text-xs"
+						/>
+						<Button size="sm" variant="outline" onclick={() => saveSchedule(db)} disabled={!s3Set}>
+							Save schedule
+						</Button>
+						<Button size="sm" onclick={() => backupNow(db)} disabled={!s3Set}>
+							<CloudUploadIcon class="size-4" /> Backup now
+						</Button>
+					</div>
+				</div>
+			{/each}
+			{#if !s3Set && dbs.length}
+				<p class="text-muted-foreground text-sm">Configure S3 storage above to enable backups.</p>
+			{/if}
+		</Card.Content>
 	</Card.Root>
 </div>
+
+<Dialog.Root bind:open={backupOpen}>
+	<Dialog.Content class="max-w-xl">
+		<Dialog.Header>
+			<Dialog.Title>Backing up {backupTarget}</Dialog.Title>
+		</Dialog.Header>
+		<div class="bg-card max-h-72 overflow-y-auto rounded-md border p-3 font-mono text-xs leading-5">
+			{#each backupLines as line, i (i)}<div class="whitespace-pre-wrap">{line}</div>{/each}
+			{#if backingUp}<div class="text-muted-foreground">…</div>{/if}
+		</div>
+	</Dialog.Content>
+</Dialog.Root>

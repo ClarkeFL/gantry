@@ -35,6 +35,15 @@ type panelSettings struct {
 	SessionDays int `json:"session_days,omitempty"` // 0 = default 7
 
 	APITokens []apiToken `json:"api_tokens,omitempty"`
+
+	// S3-compatible storage for database backups (dokku <plugin>:backup)
+	S3Bucket   string `json:"s3_bucket,omitempty"`
+	S3Region   string `json:"s3_region,omitempty"`
+	S3Key      string `json:"s3_key,omitempty"`
+	S3Secret   string `json:"s3_secret,omitempty"`
+	S3Endpoint string `json:"s3_endpoint,omitempty"` // blank = AWS
+
+	AlertWebhook string `json:"alert_webhook,omitempty"` // Slack/Discord-compatible
 }
 
 type apiToken struct {
@@ -95,16 +104,28 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		tokens = append(tokens, map[string]string{"name": t.Name, "created": t.Created})
 	}
 	settingsMu.Unlock()
+	settingsMu.Lock()
+	s3 := map[string]any{
+		"bucket":   settings.S3Bucket,
+		"region":   settings.S3Region,
+		"endpoint": settings.S3Endpoint,
+		"keySet":   settings.S3Key != "" && settings.S3Secret != "",
+	}
+	webhook := settings.AlertWebhook
+	settingsMu.Unlock()
 	out := map[string]any{
-		"githubUser":  user,
-		"githubToken": masked,
-		"leEmail":     leEmail,
-		"registries":  registries,
-		"sessionDays": sessionDays,
-		"tokens":      tokens,
-		"email":       auth.Email,
-		"totpEnabled": auth.TOTPSecret != "",
-		"totpPending": auth.PendingTOTP != "",
+		"githubUser":   user,
+		"githubToken":  masked,
+		"leEmail":      leEmail,
+		"registries":   registries,
+		"sessionDays":  sessionDays,
+		"tokens":       tokens,
+		"s3":           s3,
+		"alertWebhook": webhook,
+		"email":        auth.Email,
+		"totpEnabled":  auth.TOTPSecret != "",
+		"totpPending":  auth.PendingTOTP != "",
+		"recoveryLeft": len(auth.Recovery),
 	}
 	if auth.PendingTOTP != "" {
 		out["pendingSecret"] = auth.PendingTOTP
@@ -137,11 +158,22 @@ func handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auth.TOTPSecret, auth.PendingTOTP = auth.PendingTOTP, ""
+	// fresh one-time recovery codes — shown once, stored hashed
+	codes := make([]string, 8)
+	auth.Recovery = nil
+	for i := range codes {
+		b := make([]byte, 4)
+		rand.Read(b)
+		c := hex.EncodeToString(b)
+		codes[i] = c[:4] + "-" + c[4:]
+		sum := sha256.Sum256([]byte(c))
+		auth.Recovery = append(auth.Recovery, hex.EncodeToString(sum[:]))
+	}
 	if err := saveAuth(); err != nil {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true})
+	writeJSON(w, map[string]any{"ok": true, "recovery": codes})
 }
 
 func handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
@@ -154,12 +186,54 @@ func handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 401, "password is wrong")
 		return
 	}
-	auth.TOTPSecret, auth.PendingTOTP = "", ""
+	auth.TOTPSecret, auth.PendingTOTP, auth.Recovery = "", "", nil
 	if err := saveAuth(); err != nil {
 		httpErr(w, 500, err.Error())
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleS3Set(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Bucket, Region, Key, Secret, Endpoint string }
+	json.NewDecoder(r.Body).Decode(&req)
+	settingsMu.Lock()
+	settings.S3Bucket = strings.TrimSpace(req.Bucket)
+	settings.S3Region = strings.TrimSpace(req.Region)
+	settings.S3Endpoint = strings.TrimSpace(req.Endpoint)
+	if strings.TrimSpace(req.Key) != "" {
+		settings.S3Key = strings.TrimSpace(req.Key)
+	}
+	if strings.TrimSpace(req.Secret) != "" {
+		settings.S3Secret = strings.TrimSpace(req.Secret)
+	}
+	saveSettings()
+	settingsMu.Unlock()
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleWebhookSet(w http.ResponseWriter, r *http.Request) {
+	var req struct{ URL string }
+	json.NewDecoder(r.Body).Decode(&req)
+	settingsMu.Lock()
+	settings.AlertWebhook = strings.TrimSpace(req.URL)
+	saveSettings()
+	settingsMu.Unlock()
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// notifyWebhook fires-and-forgets a message to the configured webhook.
+// The payload carries both "text" (Slack) and "content" (Discord).
+func notifyWebhook(msg string) {
+	settingsMu.Lock()
+	url := settings.AlertWebhook
+	settingsMu.Unlock()
+	if url == "" {
+		return
+	}
+	b, _ := json.Marshal(map[string]string{"text": msg, "content": msg})
+	client := &http.Client{Timeout: 10 * time.Second}
+	client.Post(url, "application/json", strings.NewReader(string(b)))
 }
 
 // --- API tokens: Bearer auth for agents/scripts; full API except /api/settings ---
@@ -208,10 +282,10 @@ func handleTokenDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-func tokenValid(r *http.Request) bool {
+func tokenName(r *http.Request) (string, bool) {
 	bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok {
-		return false
+		return "", false
 	}
 	sum := sha256.Sum256([]byte(strings.TrimSpace(bearer)))
 	h := hex.EncodeToString(sum[:])
@@ -219,10 +293,10 @@ func tokenValid(r *http.Request) bool {
 	defer settingsMu.Unlock()
 	for _, t := range settings.APITokens {
 		if subtle.ConstantTimeCompare([]byte(t.Hash), []byte(h)) == 1 {
-			return true
+			return t.Name, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func handleSessionDays(w http.ResponseWriter, r *http.Request) {

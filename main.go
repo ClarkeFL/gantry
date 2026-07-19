@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -44,6 +45,11 @@ func main() {
 	loadSessions()
 	if mockMode {
 		loadMockState()
+	} else {
+		// nightly disk reclaim — old deploy images fill small VPSes within months
+		prune := "# managed by gantry — reclaims disk from old deploy images\n" +
+			"30 4 * * * root docker image prune -af --filter \"until=168h\" >/dev/null 2>&1; docker container prune -f >/dev/null 2>&1\n"
+		os.WriteFile(filepath.Join(cronDir, "gantry-prune"), []byte(prune), 0o644)
 	}
 	startStatsSampler()
 
@@ -94,6 +100,13 @@ func main() {
 		"GET /api/apps/{name}/logs/deploy": handleDeployLog,
 		"POST /api/apps/{name}/deploy":   handleDeploy,
 		"PUT /api/apps/{name}/cron":      handleCronPut,
+		"POST /api/services/link":            handleServiceLink,
+		"GET /api/backups":                   handleBackups,
+		"POST /api/services/backup":          handleServiceBackup,
+		"POST /api/services/backup/schedule": handleBackupSchedule,
+		"POST /api/settings/s3":              handleS3Set,
+		"POST /api/settings/webhook":         handleWebhookSet,
+		"GET /api/audit":                     handleAudit,
 	}
 	for p, h := range protected {
 		mux.Handle(p, requireAuth(h))

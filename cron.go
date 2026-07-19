@@ -33,6 +33,9 @@ type appMeta struct {
 	BuildDir   string    `json:"build_dir,omitempty"`
 	Dockerfile string    `json:"dockerfile,omitempty"`
 	Image      string    `json:"image,omitempty"`
+
+	LastDeploy   string `json:"last_deploy,omitempty"` // RFC3339
+	LastDeployOK bool   `json:"last_deploy_ok,omitempty"`
 }
 
 var (

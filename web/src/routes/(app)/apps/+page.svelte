@@ -20,7 +20,13 @@
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 
-	type App = { name: string; running: boolean; category: string };
+	type App = {
+		name: string;
+		running: boolean;
+		category: string;
+		lastDeploy?: string;
+		lastDeployOk: boolean;
+	};
 
 	let apps = $state<App[]>([]);
 	let categories = $state<string[]>([]);
@@ -221,7 +227,14 @@
 											title={app.running ? 'running' : 'stopped'}
 										></span>
 									</Card.Title>
-									<Card.Description>{app.running ? 'Running' : 'Stopped'}</Card.Description>
+									<Card.Description class="flex items-center gap-2">
+										{app.running ? 'Running' : 'Stopped'}
+										{#if app.lastDeploy && !app.lastDeployOk}
+											<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-500">
+												last deploy failed
+											</span>
+										{/if}
+									</Card.Description>
 								</Card.Header>
 							</Card.Root>
 						</a>

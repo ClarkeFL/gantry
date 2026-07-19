@@ -5,7 +5,9 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/binary"
@@ -24,11 +26,30 @@ import (
 )
 
 type authConfig struct {
-	Email       string `json:"email,omitempty"`
-	Salt        string `json:"salt"`
-	Hash        string `json:"hash"`
-	TOTPSecret  string `json:"totp_secret,omitempty"`
-	PendingTOTP string `json:"pending_totp,omitempty"`
+	Email       string   `json:"email,omitempty"`
+	Salt        string   `json:"salt"`
+	Hash        string   `json:"hash"`
+	TOTPSecret  string   `json:"totp_secret,omitempty"`
+	PendingTOTP string   `json:"pending_totp,omitempty"`
+	Recovery    []string `json:"recovery,omitempty"` // sha256 hex of unused one-time codes
+}
+
+// useRecoveryCode burns a 2FA recovery code if it matches; accepts with or without the dash.
+func useRecoveryCode(code string) bool {
+	code = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(code), "-", ""))
+	if code == "" {
+		return false
+	}
+	sum := sha256.Sum256([]byte(code))
+	h := hex.EncodeToString(sum[:])
+	for i, stored := range auth.Recovery {
+		if subtle.ConstantTimeCompare([]byte(stored), []byte(h)) == 1 {
+			auth.Recovery = append(auth.Recovery[:i], auth.Recovery[i+1:]...)
+			saveAuth()
+			return true
+		}
+	}
+	return false
 }
 
 var (
@@ -220,15 +241,21 @@ func sessionValid(r *http.Request) bool {
 
 func requireAuth(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !sessionValid(r) {
-			// API tokens get everything except the settings/auth surface —
-			// an agent can deploy but never change the password, 2FA or tokens.
-			if strings.HasPrefix(r.URL.Path, "/api/settings") || !tokenValid(r) {
-				httpErr(w, http.StatusUnauthorized, "unauthorized")
+		if sessionValid(r) {
+			audit(r, "admin")
+			h(w, r)
+			return
+		}
+		// API tokens get everything except the settings/auth surface —
+		// an agent can deploy but never change the password, 2FA or tokens.
+		if !strings.HasPrefix(r.URL.Path, "/api/settings") {
+			if name, ok := tokenName(r); ok {
+				audit(r, "token:"+name)
+				h(w, r)
 				return
 			}
 		}
-		h(w, r)
+		httpErr(w, http.StatusUnauthorized, "unauthorized")
 	})
 }
 
@@ -368,7 +395,7 @@ func handleLoginMFA(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusUnauthorized, "login expired — start again")
 		return
 	}
-	if !codeValid(auth.TOTPSecret, req.Code) {
+	if !codeValid(auth.TOTPSecret, req.Code) && !useRecoveryCode(req.Code) {
 		httpErr(w, http.StatusUnauthorized, "wrong code")
 		return
 	}

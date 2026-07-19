@@ -37,13 +37,14 @@ func streamCmd(ctx context.Context, fn func(string), name string, args ...string
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	go func() { cmd.Wait(); pw.Close() }()
+	errCh := make(chan error, 1)
+	go func() { errCh <- cmd.Wait(); pw.Close() }()
 	sc := bufio.NewScanner(pr)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
 		fn(sc.Text())
 	}
-	return nil
+	return <-errCh
 }
 
 type service struct {
@@ -97,23 +98,27 @@ var (
 		"api":     {"api.example.com"},
 		"landing": {"example.com", "www.example.com"},
 	}
+	mockLinks     = map[string][]string{"postgres/main-db": {"api"}} // "type/name" -> apps
+	mockSchedules = map[string]string{}                             // "type/name" -> cron
 )
 
 // mock state persists across panel restarts so dev behaves like real dokku
 // (which keeps SSL/running/domain state itself).
 type mockState struct {
-	Env      map[string]map[string]string `json:"env"`
-	Running  map[string]bool              `json:"running"`
-	SSL      map[string]bool              `json:"ssl"`
-	Domains  map[string][]string          `json:"domains"`
-	Services []service                    `json:"services"`
+	Env       map[string]map[string]string `json:"env"`
+	Running   map[string]bool              `json:"running"`
+	SSL       map[string]bool              `json:"ssl"`
+	Domains   map[string][]string          `json:"domains"`
+	Services  []service                    `json:"services"`
+	Links     map[string][]string          `json:"links"`
+	Schedules map[string]string            `json:"schedules"`
 }
 
 func mockStatePath() string { return filepath.Join(dataDir, "mockstate.json") }
 
 // saveMockState is called with mockMu held.
 func saveMockState() {
-	b, _ := json.Marshal(mockState{mockEnv, mockRunning, mockSSL, mockDomains, mockServices})
+	b, _ := json.Marshal(mockState{mockEnv, mockRunning, mockSSL, mockDomains, mockServices, mockLinks, mockSchedules})
 	os.WriteFile(mockStatePath(), b, 0o644)
 }
 
@@ -127,6 +132,12 @@ func loadMockState() {
 		return
 	}
 	mockEnv, mockRunning, mockSSL, mockDomains, mockServices = s.Env, s.Running, s.SSL, s.Domains, s.Services
+	if s.Links != nil {
+		mockLinks = s.Links
+	}
+	if s.Schedules != nil {
+		mockSchedules = s.Schedules
+	}
 }
 
 func mockDokku(args []string) (string, error) {
@@ -179,6 +190,36 @@ func mockDokku(args []string) (string, error) {
 		delete(mockDomains, app)
 		delete(mockSSL, app)
 		return "-----> Destroyed " + app, nil
+	case strings.HasSuffix(verb, ":links"):
+		return strings.Join(mockLinks[strings.Split(verb, ":")[0]+"/"+args[i+1]], "\n"), nil
+	case strings.HasSuffix(verb, ":link"):
+		key := strings.Split(verb, ":")[0] + "/" + args[i+1]
+		mockLinks[key] = append(mockLinks[key], args[i+2])
+		return "-----> Linked", nil
+	case strings.HasSuffix(verb, ":unlink"):
+		key := strings.Split(verb, ":")[0] + "/" + args[i+1]
+		kept := []string{}
+		for _, a := range mockLinks[key] {
+			if a != args[i+2] {
+				kept = append(kept, a)
+			}
+		}
+		mockLinks[key] = kept
+		return "-----> Unlinked", nil
+	case strings.HasSuffix(verb, ":backup-schedule-cat"):
+		key := strings.Split(verb, ":")[0] + "/" + args[i+1]
+		if s := mockSchedules[key]; s != "" {
+			return s + " dokku " + strings.Split(verb, ":")[0] + ":backup " + args[i+1], nil
+		}
+		return "", fmt.Errorf("no schedule")
+	case strings.HasSuffix(verb, ":backup-schedule"):
+		mockSchedules[strings.Split(verb, ":")[0]+"/"+args[i+1]] = args[i+2]
+		return "-----> Scheduled", nil
+	case strings.HasSuffix(verb, ":backup-unschedule"):
+		delete(mockSchedules, strings.Split(verb, ":")[0]+"/"+args[i+1])
+		return "-----> Unscheduled", nil
+	case strings.HasSuffix(verb, ":backup-auth"):
+		return "-----> OK", nil
 	case strings.HasSuffix(verb, ":destroy"):
 		kept := mockServices[:0]
 		for _, s := range mockServices {

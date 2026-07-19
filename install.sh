@@ -13,7 +13,11 @@ echo "==> updating system packages..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get -qq update
 apt-get -y -qq upgrade
-apt-get -y -qq install curl wget ca-certificates
+apt-get -y -qq install curl wget ca-certificates unattended-upgrades
+
+# automatic OS security updates
+printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
+  > /etc/apt/apt.conf.d/20auto-upgrades
 
 # 1. dokku (skipped if already installed)
 if ! command -v dokku >/dev/null 2>&1; then
