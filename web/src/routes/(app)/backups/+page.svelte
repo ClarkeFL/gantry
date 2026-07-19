@@ -255,19 +255,20 @@
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-3">
-			<form onsubmit={saveServerSchedule} class="flex flex-wrap items-end gap-3">
-				<div class="grid gap-1">
+			<form onsubmit={saveServerSchedule} class="grid gap-3">
+				<div class="grid gap-1.5">
 					<Label>Schedule</Label>
 					<CronInput bind:value={serverSchedule} allowEmpty />
 				</div>
-				<div class="grid gap-1">
+				<div class="flex flex-wrap items-center gap-3">
 					<Label for="srv-keep">Keep last</Label>
 					<Input id="srv-keep" type="number" min={1} max={100} bind:value={serverKeep} class="w-20" />
+					<span class="text-muted-foreground text-sm">backups, older ones are deleted</span>
+					<Button type="submit" variant="outline" disabled={savingServer || !s3Set}>Save</Button>
+					<Button type="button" onclick={serverBackupNow} disabled={!s3Set}>
+						<CloudUploadIcon class="size-4" /> Backup now
+					</Button>
 				</div>
-				<Button type="submit" variant="outline" disabled={savingServer || !s3Set}>Save</Button>
-				<Button type="button" onclick={serverBackupNow} disabled={!s3Set}>
-					<CloudUploadIcon class="size-4" /> Backup now
-				</Button>
 			</form>
 			{#if lastBackup}
 				<p class="text-muted-foreground font-mono text-xs">last: {lastBackup}</p>
