@@ -1,5 +1,5 @@
 #!/bin/sh
-# gantry installer — Ubuntu/Debian, run as root:
+# gantry installer, Ubuntu/Debian, run as root:
 #   curl -fsSL https://raw.githubusercontent.com/ClarkeFL/gantry/main/install.sh | sudo GANTRY_REPO=ClarkeFL/gantry sh
 set -e
 
@@ -40,10 +40,10 @@ mv /usr/local/bin/gantry.new /usr/local/bin/gantry
 # 3. account setup happens in the browser on first visit (register → enable 2FA)
 mkdir -p /var/lib/gantry
 
-# 4. systemd service — auto-start on boot, auto-restart (also how self-update applies)
+# 4. systemd service, auto-start on boot, auto-restart (also how self-update applies)
 cat > /etc/systemd/system/gantry.service <<EOF
 [Unit]
-Description=gantry — dokku panel
+Description=gantry, dokku panel
 After=network.target
 
 [Service]
@@ -65,7 +65,7 @@ echo "================================================="
 echo "  gantry is installed and running"
 echo ""
 echo "  panel:    https://$IP:8022"
-echo "            (self-signed certificate — your browser warns once; accept to continue)"
+echo "            (self-signed certificate, your browser warns once; accept to continue)"
 echo "  service:  systemctl status gantry"
 echo "  logs:     journalctl -u gantry -f"
 echo ""

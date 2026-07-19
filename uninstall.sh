@@ -1,5 +1,5 @@
 #!/bin/sh
-# gantry uninstaller — removes the panel, leaves dokku and your apps alone.
+# gantry uninstaller, removes the panel, leaves dokku and your apps alone.
 #   sudo sh uninstall.sh          # remove panel, keep data (/var/lib/gantry)
 #   sudo sh uninstall.sh --purge  # remove panel AND its data + panel-managed cron jobs
 set -e

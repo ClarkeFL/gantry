@@ -1,6 +1,6 @@
 package main
 
-// Self-signed HTTPS on the bare IP: one port serves both protocols — the
+// Self-signed HTTPS on the bare IP: one port serves both protocols, the
 // first byte of each connection says whether it's a TLS handshake (0x16) or
 // plain HTTP, which gets a redirect to https://. The cert is generated once
 // into the data dir and regenerated if the server's IP is no longer in it.
@@ -38,7 +38,7 @@ func loadOrCreateCert() (tls.Certificate, error) {
 				}
 			}
 		}
-		// server IP changed since the cert was made — fall through and regenerate
+		// server IP changed since the cert was made, fall through and regenerate
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -97,7 +97,7 @@ func (l *chanListener) Addr() net.Addr { return l.addr }
 func serveDual(addr string, mux http.Handler) error {
 	cert, err := loadOrCreateCert()
 	if err != nil {
-		log.Printf("tls: %v — falling back to plain HTTP", err)
+		log.Printf("tls: %v, falling back to plain HTTP", err)
 		return http.ListenAndServe(addr, mux)
 	}
 	ln, err := net.Listen("tcp", addr)
@@ -111,7 +111,7 @@ func serveDual(addr string, mux http.Handler) error {
 	})
 	go http.Serve(httpLn, redirect)
 	go http.Serve(tls.NewListener(tlsLn, &tls.Config{Certificates: []tls.Certificate{cert}}), mux)
-	log.Printf("https on (self-signed certificate — your browser will warn once)")
+	log.Printf("https on (self-signed certificate, your browser will warn once)")
 	for {
 		c, err := ln.Accept()
 		if err != nil {

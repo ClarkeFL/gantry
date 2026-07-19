@@ -71,7 +71,7 @@
 		updating = true;
 		try {
 			await api('/update', { method: 'POST' });
-			toast.success('Updating — the panel restarts in a few seconds');
+			toast.success('Updating, the panel restarts in a few seconds');
 			setTimeout(() => location.reload(), 5000);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : String(e));

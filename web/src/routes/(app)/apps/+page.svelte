@@ -96,7 +96,7 @@
 				method: 'POST',
 				body: JSON.stringify({ name: n, category: newAppCategory.trim() })
 			});
-			toast.success(`Created ${n} — pick a source to deploy`);
+			toast.success(`Created ${n}, pick a source to deploy`);
 			newAppOpen = false;
 			goto(`/app/${n}?tab=source`);
 		} catch (e) {
@@ -244,7 +244,7 @@
 				<p class="text-muted-foreground text-sm">No apps in this category yet.</p>
 			{/if}
 		{:else}
-			<p class="text-muted-foreground text-sm">No apps yet — create one to get started.</p>
+			<p class="text-muted-foreground text-sm">No apps yet, create one to get started.</p>
 		{/each}
 	{/if}
 </div>
@@ -287,7 +287,7 @@
 	<Dialog.Content class="max-w-sm">
 		<Dialog.Header>
 			<Dialog.Title>New category</Dialog.Title>
-			<Dialog.Description>Groups apps on this page — assign apps to it when creating or from their page.</Dialog.Description>
+			<Dialog.Description>Groups apps on this page, assign apps to it when creating or from their page.</Dialog.Description>
 		</Dialog.Header>
 		<form onsubmit={createCategory} class="grid gap-4">
 			<Input bind:value={newCatName} required placeholder="e.g. Client sites" />

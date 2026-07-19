@@ -109,7 +109,7 @@
 				body: JSON.stringify({ type: s.type, name: s.name, app, unlink })
 			});
 			toast.success(
-				unlink ? `Unlinked ${app} from ${s.name}` : `Linked ${s.name} to ${app} — its connection URL is now in the app's env`
+				unlink ? `Unlinked ${app} from ${s.name}` : `Linked ${s.name} to ${app}, its connection URL is now in the app's env`
 			);
 			await load();
 		} catch (e) {
@@ -337,7 +337,7 @@
 			{/if}
 		{:else}
 			<p class="text-muted-foreground text-sm">
-				No databases yet — use the quick-create buttons above. Each needs its dokku plugin installed
+				No databases yet, use the quick-create buttons above. Each needs its dokku plugin installed
 				on the server (e.g. <code>dokku plugin:install https://github.com/dokku/dokku-postgres.git postgres</code>).
 			</p>
 		{/each}

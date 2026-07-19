@@ -1,6 +1,6 @@
 package main
 
-// Minimal S3 client (PUT/LIST/DELETE) with SigV4 signing — enough for panel
+// Minimal S3 client (PUT/LIST/DELETE) with SigV4 signing, enough for panel
 // backups without pulling in the AWS SDK. Works with AWS and S3-compatible
 // endpoints (path-style when an endpoint is set).
 
@@ -143,6 +143,18 @@ func s3List(prefix string) ([]string, error) {
 	}
 	sort.Strings(keys) // timestamped names → oldest first
 	return keys, nil
+}
+
+func s3Get(key string) ([]byte, error) {
+	resp, err := s3Request("GET", key, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, s3Err(resp)
+	}
+	return io.ReadAll(resp.Body)
 }
 
 func s3Delete(key string) error {

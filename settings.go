@@ -27,7 +27,7 @@ type panelSettings struct {
 	GitHubToken string         `json:"github_token,omitempty"`
 	LEEmail     string         `json:"letsencrypt_email,omitempty"`
 	Categories  []string       `json:"categories,omitempty"`
-	Registries  []registryCred `json:"registries,omitempty"` // display only — docker stores the creds
+	Registries  []registryCred `json:"registries,omitempty"` // display only, docker stores the creds
 
 	DBCategories []string          `json:"db_categories,omitempty"`
 	DBCategory   map[string]string `json:"db_category,omitempty"` // "postgres/main-db" -> category
@@ -49,7 +49,7 @@ type panelSettings struct {
 
 type apiToken struct {
 	Name    string `json:"name"`
-	Hash    string `json:"hash"` // sha256 hex — the token itself is shown once and never stored
+	Hash    string `json:"hash"` // sha256 hex, the token itself is shown once and never stored
 	Created string `json:"created"`
 }
 
@@ -155,11 +155,11 @@ func handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !codeValid(auth.PendingTOTP, strings.TrimSpace(req.Code)) {
-		httpErr(w, 401, "wrong code — try the next one from your app")
+		httpErr(w, 401, "wrong code, try the next one from your app")
 		return
 	}
 	auth.TOTPSecret, auth.PendingTOTP = auth.PendingTOTP, ""
-	// fresh one-time recovery codes — shown once, stored hashed
+	// fresh one-time recovery codes, shown once, stored hashed
 	codes := make([]string, 8)
 	auth.Recovery = nil
 	for i := range codes {
@@ -654,7 +654,7 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// handleTOTPQR shows the QR only while a setup is pending — the active secret is never re-displayed.
+// handleTOTPQR shows the QR only while a setup is pending, the active secret is never re-displayed.
 func handleTOTPQR(w http.ResponseWriter, r *http.Request) {
 	if auth.PendingTOTP == "" {
 		httpErr(w, 404, "no 2FA setup in progress")

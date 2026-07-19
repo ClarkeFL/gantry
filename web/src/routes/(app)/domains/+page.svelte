@@ -49,7 +49,7 @@
 		</div>
 	{:else}
 		<p class="text-muted-foreground text-sm">
-			No domains configured yet. Add one with <code>dokku domains:add &lt;app&gt; &lt;domain&gt;</code> —
+			No domains configured yet. Add one with <code>dokku domains:add &lt;app&gt; &lt;domain&gt;</code>,
 			in-panel domain management is coming.
 		</p>
 	{/if}

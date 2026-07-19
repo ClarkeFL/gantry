@@ -1,4 +1,4 @@
-// In-app replacement for window.confirm — native dialogs are suppressed in
+// In-app replacement for window.confirm, native dialogs are suppressed in
 // some embedded browsers, which silently cancels destructive actions.
 export const confirmState = $state({
 	open: false,

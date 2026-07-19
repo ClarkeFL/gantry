@@ -473,7 +473,7 @@ func handleServerBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if mockMode {
-		for _, l := range []string{"[backup] collecting panel state and app definitions…", "[backup] uploading 42 KB to s3://mock-bucket/gantry/panel-mock.tar.gz", "[backup] done — gantry/panel-mock.tar.gz"} {
+		for _, l := range []string{"[backup] collecting panel state and app definitions…", "[backup] uploading 42 KB to s3://mock-bucket/gantry/panel-mock.tar.gz", "[backup] done, gantry/panel-mock.tar.gz"} {
 			send(l)
 			time.Sleep(300 * time.Millisecond)
 		}
@@ -516,7 +516,7 @@ func handleServerBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		exe = "/usr/local/bin/gantry"
 	}
-	content := "# managed by gantry — scheduled full server backup\n" +
+	content := "# managed by gantry, scheduled full server backup\n" +
 		req.Schedule + " root " + exe + " backup >/dev/null 2>&1\n"
 	os.MkdirAll(cronDir, 0o755)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -556,7 +556,7 @@ func handleServiceBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := streamCmd(r.Context(), send, "dokku", req.Type+":backup", req.Name, bucket); err != nil {
-		send("[error] backup failed (" + err.Error() + ") — see output above")
+		send("[error] backup failed (" + err.Error() + "), see output above")
 		go notifyWebhook("gantry: backup failed for " + req.Type + "/" + req.Name)
 		return
 	}
@@ -686,7 +686,7 @@ func handleCreateService(w http.ResponseWriter, r *http.Request) {
 		send("[gantry] done")
 		return
 	}
-	// first create on a plugin pulls its image — stream so the UI shows progress
+	// first create on a plugin pulls its image, stream so the UI shows progress
 	streamCmd(r.Context(), send, "dokku", req.Type+":create", req.Name)
 	send("[gantry] done")
 }
@@ -923,8 +923,8 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		if detail != "" {
 			send("[error] " + detail)
 		}
-		send("[gantry] aborted — nothing was deployed")
-		go notifyWebhook("gantry: deploy failed for " + name + " — " + detail)
+		send("[gantry] aborted, nothing was deployed")
+		go notifyWebhook("gantry: deploy failed for " + name + ", " + detail)
 	}
 	if mockMode {
 		src := "last source"
@@ -959,7 +959,7 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		if user != "" && tok != "" && strings.HasPrefix(url, "https://github.com/") {
 			url = "https://" + user + ":" + tok + "@" + strings.TrimPrefix(url, "https://")
 		}
-		// pre-flight: repo reachable, auth ok, branch exists — before any build starts
+		// pre-flight: repo reachable, auth ok, branch exists, before any build starts
 		send("[check] verifying repository access…")
 		checkArgs := []string{"ls-remote", "--exit-code", url}
 		if req.Ref != "" {
@@ -997,7 +997,7 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 		runErr = streamCmd(r.Context(), send, "dokku", "ps:rebuild", name)
 	}
 	if runErr != nil {
-		finish(false, "deploy exited with an error ("+runErr.Error()+") — see the output above")
+		finish(false, "deploy exited with an error ("+runErr.Error()+"), see the output above")
 		return
 	}
 	finish(true, "")

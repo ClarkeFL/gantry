@@ -1,7 +1,7 @@
 # gantry
 
 A single-binary panel for [Dokku](https://dokku.com). ~25MB RAM, no database, no runtime
-dependencies — Dokku and the filesystem are the state.
+dependencies, Dokku and the filesystem are the state.
 
 - **Apps** grouped into categories, with status, env editor, log streaming, deploy trigger
 - **Per-app cron tab** (the reason this exists): jobs run in a fresh one-off container
@@ -19,18 +19,18 @@ curl -fsSL https://raw.githubusercontent.com/ClarkeFL/gantry/main/install.sh | s
 
 What it does, in order:
 
-1. Runs a system update, then installs Dokku (official bootstrap) — skipped if `dokku`
-   is already on the box — plus the letsencrypt plugin
+1. Runs a system update, then installs Dokku (official bootstrap), skipped if `dokku`
+   is already on the box, plus the letsencrypt plugin
 2. Downloads the latest `gantry-linux-<arch>` release binary to `/usr/local/bin/gantry`
 3. Installs a systemd service: starts on boot, restarts on crash (and after self-update)
 
-Then open `https://<server-ip>:8022` — the panel serves HTTPS with a self-signed
+Then open `https://<server-ip>:8022`, the panel serves HTTPS with a self-signed
 certificate, so your browser warns once (accept it; plain `http://` redirects there
-automatically). **Create your admin account** (email + password —
+automatically). **Create your admin account** (email + password,
 registration is only possible while no account exists), and **enable 2FA in Settings**
 (scan the QR, confirm a code). Login is two-step: email + password, then the 6-digit code.
 
-Re-running the installer is safe — it updates the binary and skips what's done
+Re-running the installer is safe, it updates the binary and skips what's done
 (that's also the "repair" path). `sh uninstall.sh [--purge]` removes the panel and
 leaves dokku + your apps alone.
 
@@ -64,7 +64,7 @@ That workflow builds the frontend, compiles `gantry-linux-amd64` and `gantry-lin
 `gh run watch`.
 
 Once the release is up, every installed panel can pull it with the **Update panel** button
-in the sidebar (downloads the latest release binary, swaps itself, restarts via systemd —
+in the sidebar (downloads the latest release binary, swaps itself, restarts via systemd,
 takes ~5 seconds). `install.sh` always grabs the latest release too.
 
 Rollback: `gh release delete <bad-tag>` so `latest` points at the previous release again,
@@ -77,5 +77,5 @@ then hit Update on the server.
 | `GANTRY_ADDR` | `:8022` | listen address |
 | `GANTRY_DATA` | `/var/lib/gantry` | auth.json, meta.json, cron logs |
 | `GANTRY_CRON_DIR` | `/etc/cron.d` | where cron files are written |
-| `GANTRY_REPO` | — | `user/repo` for self-update |
-| `GANTRY_MOCK` | — | `1` = fake dokku for UI dev |
+| `GANTRY_REPO` |, | `user/repo` for self-update |
+| `GANTRY_MOCK` |, | `1` = fake dokku for UI dev |

@@ -2,7 +2,7 @@ package main
 
 // Full server backup: one tar.gz holding the panel's state dir, the gantry
 // cron files, and every app's definition (env + domains, plus meta.json's
-// sources/cron/categories) — uploaded to the configured S3 bucket, oldest
+// sources/cron/categories), uploaded to the configured S3 bucket, oldest
 // pruned beyond the retention count. `gantry restore <file>` rebuilds a
 // server from it. Databases are covered separately by dokku's own dumps.
 
@@ -136,7 +136,7 @@ func runServerBackup(progress func(string)) error {
 	progress(fmt.Sprintf("[backup] uploading %d KB to s3://%s/%s", len(archive)/1024, bucket, key))
 	if err := s3Put(key, archive); err != nil {
 		logBackup("failed: " + err.Error())
-		go notifyWebhook("gantry: server backup failed — " + err.Error())
+		go notifyWebhook("gantry: server backup failed, " + err.Error())
 		return err
 	}
 	keep := backupKeep()
@@ -148,7 +148,7 @@ func runServerBackup(progress func(string)) error {
 		}
 	}
 	logBackup("ok " + key + fmt.Sprintf(" (%d KB, keep %d)", len(archive)/1024, keep))
-	progress("[backup] done — " + key)
+	progress("[backup] done, " + key)
 	return nil
 }
 

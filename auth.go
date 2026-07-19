@@ -246,7 +246,7 @@ func requireAuth(h http.HandlerFunc) http.Handler {
 			h(w, r)
 			return
 		}
-		// API tokens get everything except the settings/auth surface —
+		// API tokens get everything except the settings/auth surface,
 		// an agent can deploy but never change the password, 2FA or tokens.
 		if !strings.HasPrefix(r.URL.Path, "/api/settings") {
 			if name, ok := tokenName(r); ok {
@@ -392,7 +392,7 @@ func handleLoginMFA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !takeMFAToken(req.Token) {
-		httpErr(w, http.StatusUnauthorized, "login expired — start again")
+		httpErr(w, http.StatusUnauthorized, "login expired, start again")
 		return
 	}
 	if !codeValid(auth.TOTPSecret, req.Code) && !useRecoveryCode(req.Code) {

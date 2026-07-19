@@ -7,6 +7,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
+	import CronInput from '$lib/components/cron-input.svelte';
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Skeleton } from '$lib/components/ui/skeleton';
@@ -105,7 +106,7 @@
 	let sslRunning = $state(false);
 	let sslLines = $state<string[]>([]);
 	let stopSSL: (() => void) | null = null;
-	let autoSSLTried = false; // once per page visit — avoids hammering LE rate limits on failures
+	let autoSSLTried = false; // once per page visit, avoids hammering LE rate limits on failures
 	let dnsTimer: ReturnType<typeof setInterval> | undefined;
 
 	function msg(e: unknown) {
@@ -134,7 +135,7 @@
 		}
 		if (!d.ssl && d.leEmailSet && d.domains.length && !waiting && !autoSSLTried && !sslRunning) {
 			autoSSLTried = true;
-			toast.info('All domains point here — requesting certificate');
+			toast.info('All domains point here, requesting certificate');
 			sslOpen = true;
 			enableSSL();
 		}
@@ -248,11 +249,11 @@
 			if (action === 'remove') {
 				toast.success(`Removed ${domain}`);
 			} else if (res.dnsOk) {
-				toast.success(`Added ${domain} — requesting certificate`);
+				toast.success(`Added ${domain}, requesting certificate`);
 				sslOpen = true;
 				enableSSL();
 			} else {
-				toast.info(`Added ${domain}. Its DNS doesn't point at this server yet — HTTPS will be one click away once it does.`, { duration: 8000 });
+				toast.info(`Added ${domain}. Its DNS doesn't point at this server yet, HTTPS will be one click away once it does.`, { duration: 8000 });
 			}
 		} catch (e) {
 			toast.error(msg(e));
@@ -296,7 +297,7 @@
 				else rows.push({ key, value });
 				count++;
 			}
-			toast.success(`Imported ${count} variables — review below, then Save changes`);
+			toast.success(`Imported ${count} variables, review below, then Save changes`);
 		});
 		(e.target as HTMLInputElement).value = '';
 	}
@@ -325,7 +326,7 @@
 				method: 'POST',
 				body: JSON.stringify({ set, unset, restart: restartAfterSave })
 			});
-			toast.success('Environment saved' + (restartAfterSave ? ' — app restarting' : ''));
+			toast.success('Environment saved' + (restartAfterSave ? ', app restarting' : ''));
 			await load();
 		} catch (e) {
 			toast.error(msg(e));
@@ -442,7 +443,7 @@
 						</Tabs.Root>
 						{#if srcType === 'none'}
 							<p class="text-muted-foreground text-sm">
-								No managed source — deploy via <code>git push dokku</code> or the CLI. The Deploy
+								No managed source, deploy via <code>git push dokku</code> or the CLI. The Deploy
 								button falls back to rebuilding the last deployed code.
 							</p>
 						{/if}
@@ -466,7 +467,7 @@
 								<Input id="src-df" class="font-mono text-xs" placeholder="Dockerfile" bind:value={srcDf} />
 							</div>
 							<p class="text-muted-foreground text-xs">
-								Private repo? Save your GitHub username + token in Settings — deploys authenticate with it.
+								Private repo? Save your GitHub username + token in Settings, deploys authenticate with it.
 							</p>
 						{:else if srcType === 'image'}
 							<div class="grid gap-2">
@@ -485,7 +486,7 @@
 							</div>
 							<p class="text-muted-foreground text-xs">
 								Only needed for private images. Credentials go straight to <code>docker login</code> on the
-								server on Save — the panel doesn't store them. Existing logins: Settings → Docker registries.
+								server on Save, the panel doesn't store them. Existing logins: Settings → Docker registries.
 							</p>
 						{/if}
 						<div class="flex gap-2">
@@ -522,7 +523,7 @@
 									{#if d.ssl && domain.dnsOk}
 										<LockIcon class="size-3.5 text-emerald-500" />
 									{:else if !domain.dnsOk}
-										<span class="flex items-center gap-1.5 text-xs text-amber-500" title="Point this domain's DNS at the server IP — checked every 30s">
+										<span class="flex items-center gap-1.5 text-xs text-amber-500" title="Point this domain's DNS at the server IP, checked every 30s">
 											<span class="size-1.5 animate-pulse rounded-full bg-amber-500"></span>
 											waiting for DNS
 										</span>
@@ -598,7 +599,7 @@
 					<Card.Header>
 						<Card.Title class="text-destructive text-base">Danger zone</Card.Title>
 						<Card.Description>
-							Destroys the app, its containers, config and domains. This cannot be undone —
+							Destroys the app, its containers, config and domains. This cannot be undone,
 							type <code class="text-foreground">{d.name}</code> to confirm.
 						</Card.Description>
 					</Card.Header>
@@ -672,18 +673,21 @@
 					<Card.Header>
 						<Card.Title class="text-base">Scheduled jobs</Card.Title>
 						<Card.Description>
-							Each job runs in a fresh one-off container of this app (<code>dokku --rm run {d.name} …</code>) —
+							Each job runs in a fresh one-off container of this app (<code>dokku --rm run {d.name} …</code>),
 							0MB between runs. Editable live, no redeploy.
 						</Card.Description>
 					</Card.Header>
 					<Card.Content class="grid gap-2">
 						{#each jobs as job, i (job.id || i)}
 							{@const badge = lastBadge(job.last)}
-							<div class="flex items-center gap-2">
-								<Input class="w-36 font-mono text-xs" placeholder="0 3 * * *" bind:value={job.schedule} />
-								<Input class="flex-1 font-mono text-xs" placeholder="node scripts/cleanup.js" bind:value={job.command} />
+							<div class="flex flex-wrap items-start gap-3 rounded-md border p-3">
+								<CronInput bind:value={job.schedule} />
+								<div class="grid min-w-56 flex-1 gap-1">
+									<Input class="font-mono text-xs" placeholder="node scripts/cleanup.js" bind:value={job.command} />
+									<p class="text-muted-foreground text-xs">Command to run inside the app</p>
+								</div>
 								{#if badge}
-									<Badge variant={badge.ok ? 'secondary' : 'destructive'} class="whitespace-nowrap">
+									<Badge variant={badge.ok ? 'secondary' : 'destructive'} class="mt-2 whitespace-nowrap">
 										{badge.label}
 									</Badge>
 								{/if}
@@ -697,13 +701,13 @@
 								</Button>
 							</div>
 						{:else}
-							<p class="text-muted-foreground text-sm">No jobs yet. Schedules use standard cron syntax or @daily / @hourly.</p>
+							<p class="text-muted-foreground text-sm">No jobs yet. Add one and pick how often it runs.</p>
 						{/each}
 						<div class="mt-2 flex items-center gap-2">
 							<Button
 								variant="outline"
 								size="sm"
-								onclick={() => jobs.push({ id: '', schedule: '', command: '' })}
+								onclick={() => jobs.push({ id: '', schedule: '0 3 * * *', command: '' })}
 							>
 								<PlusIcon class="size-4" /> Add job
 							</Button>
@@ -769,7 +773,7 @@
 		<Dialog.Header>
 			<Dialog.Title>{deploying ? 'Deploying' : 'Deployed'} {name}</Dialog.Title>
 			<Dialog.Description>
-				Source: <code class="text-foreground">{sourceSummary}</code> — change it on the Source tab.
+				Source: <code class="text-foreground">{sourceSummary}</code>, change it on the Source tab.
 			</Dialog.Description>
 		</Dialog.Header>
 		{#if deployLines.length}

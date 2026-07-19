@@ -28,7 +28,7 @@
 		try {
 			s = await api('/stats');
 		} catch {
-			// transient — next poll retries
+			// transient, next poll retries
 		}
 	}
 	onMount(() => {
@@ -96,7 +96,7 @@
 			{@render tile(
 				'CPU',
 				s.cpu.pct.toFixed(1) + '%',
-				`${s.cpu.cores} cores — Load ${s.cpu.load}`,
+				`${s.cpu.cores} cores, Load ${s.cpu.load}`,
 				s.hist.map((p) => p.cpu),
 				100,
 				'#d95926',

@@ -86,7 +86,7 @@ func writeCronFile(app string, jobs []cronJob) error {
 		return err
 	}
 	var b strings.Builder
-	b.WriteString("# managed by gantry — edit via the panel, not by hand\nSHELL=/bin/sh\nPATH=/usr/local/bin:/usr/bin:/bin\n")
+	b.WriteString("# managed by gantry, edit via the panel, not by hand\nSHELL=/bin/sh\nPATH=/usr/local/bin:/usr/bin:/bin\n")
 	for _, j := range jobs {
 		logf := filepath.Join(cronLogDir(), app+"-"+j.ID+".log")
 		inner := fmt.Sprintf("dokku --rm run %s %s; echo \"$(date -Is) exit=$?\" >> %s", app, j.Command, logf)

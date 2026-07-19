@@ -12,6 +12,7 @@
 	import CloudUploadIcon from '@lucide/svelte/icons/cloud-upload';
 	import BoxIcon from '@lucide/svelte/icons/box';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import CronInput from '$lib/components/cron-input.svelte';
 
 	type Db = { type: string; name: string; schedule: string };
 
@@ -226,7 +227,7 @@
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div class="grid gap-1">
-						<Label for="s3-key">Access key {#if s3Set}<span class="text-muted-foreground">(saved — blank keeps it)</span>{/if}</Label>
+						<Label for="s3-key">Access key {#if s3Set}<span class="text-muted-foreground">(saved, blank keeps it)</span>{/if}</Label>
 						<Input id="s3-key" bind:value={s3Key} placeholder="AKIA…" autocomplete="off" />
 					</div>
 					<div class="grid gap-1">
@@ -235,7 +236,7 @@
 					</div>
 				</div>
 				<div class="grid gap-1">
-					<Label for="s3-endpoint">Endpoint <span class="text-muted-foreground">(optional — non-AWS only)</span></Label>
+					<Label for="s3-endpoint">Endpoint <span class="text-muted-foreground">(optional, non-AWS only)</span></Label>
 					<Input id="s3-endpoint" bind:value={s3Endpoint} placeholder="https://s3.eu-central-003.backblazeb2.com" />
 				</div>
 				<Button type="submit" class="w-fit" disabled={savingS3}>{savingS3 ? 'Saving…' : 'Save'}</Button>
@@ -254,10 +255,10 @@
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-3">
-			<form onsubmit={saveServerSchedule} class="flex flex-wrap items-end gap-2">
+			<form onsubmit={saveServerSchedule} class="flex flex-wrap items-end gap-3">
 				<div class="grid gap-1">
-					<Label for="srv-sched">Schedule <span class="text-muted-foreground">(blank = off)</span></Label>
-					<Input id="srv-sched" bind:value={serverSchedule} placeholder="0 4 * * *" class="w-32 font-mono text-xs" />
+					<Label>Schedule</Label>
+					<CronInput bind:value={serverSchedule} allowEmpty />
 				</div>
 				<div class="grid gap-1">
 					<Label for="srv-keep">Keep last</Label>
@@ -281,7 +282,7 @@
 		<Card.Header>
 			<Card.Title class="text-base">App backups</Card.Title>
 			<Card.Description>
-				Every server backup above already includes each app's full definition — deploy source,
+				Every server backup above already includes each app's full definition, deploy source,
 				environment variables, domains, cron jobs and category. The app itself rebuilds from its
 				repo or image on deploy, so that definition is all a restore needs. You can also download
 				a single app's definition here.
@@ -308,14 +309,14 @@
 		<Card.Header>
 			<Card.Title class="text-base">Database backups</Card.Title>
 			<Card.Description>
-				Backup now, or set a cron schedule (e.g. <code>0 3 * * *</code> = 3am daily) and dokku
-				dumps the database to <code>s3://{bucket || 'your-bucket'}</code> automatically. Restore with
+				Backup now, or pick how often each database is dumped to
+				<code>s3://{bucket || 'your-bucket'}</code> automatically. Restore with
 				<code>dokku &lt;type&gt;:import &lt;name&gt; &lt; dump.sql</code>.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-2">
 			{#if !dbs.length && !loading}
-				<p class="text-muted-foreground text-sm">No databases yet — create one on the Databases page.</p>
+				<p class="text-muted-foreground text-sm">No databases yet, create one on the Databases page.</p>
 			{/if}
 			{#each dbs as db (db.type + db.name)}
 				<div class="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2">
@@ -325,12 +326,8 @@
 					{#if db.schedule}
 						<Badge variant="outline" class="font-mono text-xs">{db.schedule}</Badge>
 					{/if}
-					<div class="ml-auto flex items-center gap-2">
-						<Input
-							bind:value={schedules[db.type + '/' + db.name]}
-							placeholder="0 3 * * *"
-							class="w-32 font-mono text-xs"
-						/>
+					<div class="ml-auto flex flex-wrap items-start gap-2">
+						<CronInput bind:value={schedules[db.type + '/' + db.name]} allowEmpty />
 						<Button size="sm" variant="outline" onclick={() => saveSchedule(db)} disabled={!s3Set}>
 							Save schedule
 						</Button>

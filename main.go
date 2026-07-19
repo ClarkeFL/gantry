@@ -55,7 +55,7 @@ func main() {
 		}
 	}
 	if err := loadAuth(); err != nil {
-		log.Printf("no account yet — open the panel to register (looked in %s)", authPath())
+		log.Printf("no account yet, open the panel to register (looked in %s)", authPath())
 	}
 	loadMeta()
 	loadSettings()
@@ -63,8 +63,8 @@ func main() {
 	if mockMode {
 		loadMockState()
 	} else {
-		// nightly disk reclaim — old deploy images fill small VPSes within months
-		prune := "# managed by gantry — reclaims disk from old deploy images\n" +
+		// nightly disk reclaim, old deploy images fill small VPSes within months
+		prune := "# managed by gantry, reclaims disk from old deploy images\n" +
 			"30 4 * * * root docker image prune -af --filter \"until=168h\" >/dev/null 2>&1; docker container prune -f >/dev/null 2>&1\n"
 		os.WriteFile(filepath.Join(cronDir, "gantry-prune"), []byte(prune), 0o644)
 	}

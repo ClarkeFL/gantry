@@ -167,7 +167,7 @@
 			pendingSecret = '';
 			recoveryCodes = res.recovery ?? [];
 			recoveryLeft = recoveryCodes.length;
-			toast.success('Two-factor authentication is on — codes required at every login');
+			toast.success('Two-factor authentication is on, codes required at every login');
 		} catch (e) {
 			toast.error(msg(e));
 		} finally {
@@ -234,7 +234,7 @@
 				method: 'POST',
 				body: JSON.stringify({ user: ghUser.trim(), token: ghToken.trim() })
 			});
-			toast.success('GitHub settings saved — registry: ' + res.registry);
+			toast.success('GitHub settings saved, registry: ' + res.registry);
 			ghToken = '';
 			const s = await api('/settings');
 			githubTokenMasked = s.githubToken;
@@ -262,7 +262,7 @@
 			<Card.Description>
 				{totpEnabled
 					? 'A code from your authenticator app is required at every login.'
-					: 'Strongly recommended — this panel is reachable from the internet.'}
+					: 'Strongly recommended, this panel is reachable from the internet.'}
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-4">
@@ -301,7 +301,7 @@
 				{#if recoveryCodes.length}
 					<div class="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
 						<p class="mb-2 text-xs font-medium text-amber-500">
-							Recovery codes — save these somewhere safe now, they won't be shown again. Each works
+							Recovery codes, save these somewhere safe now, they won't be shown again. Each works
 							once at login if you lose your authenticator.
 						</p>
 						<div class="grid grid-cols-4 gap-1 font-mono text-xs">
@@ -383,7 +383,7 @@
 		<Card.Header>
 			<Card.Title class="text-base">Let's Encrypt</Card.Title>
 			<Card.Description>
-				Email used for certificate registration and expiry notices — required before enabling HTTPS on any app.
+				Email used for certificate registration and expiry notices, required before enabling HTTPS on any app.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>
@@ -398,7 +398,7 @@
 		<Card.Header>
 			<Card.Title class="text-base">Alerts</Card.Title>
 			<Card.Description>
-				A Slack or Discord webhook URL — gantry posts there when a deploy or backup fails. Blank
+				A Slack or Discord webhook URL, gantry posts there when a deploy or backup fails. Blank
 				turns alerts off.
 			</Card.Description>
 		</Card.Header>
@@ -414,7 +414,7 @@
 		<Card.Header>
 			<Card.Title class="text-base">API tokens</Card.Title>
 			<Card.Description>
-				Give AI agents and scripts access to the panel API — create apps and databases, deploy,
+				Give AI agents and scripts access to the panel API, create apps and databases, deploy,
 				read logs, manage domains. Tokens can't change settings, your password or 2FA.
 				Use as <code>Authorization: Bearer &lt;token&gt;</code>.
 			</Card.Description>
@@ -423,7 +423,7 @@
 			{#if freshToken}
 				<div class="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
 					<p class="mb-2 text-xs font-medium text-amber-500">
-						Copy this token now — it won't be shown again.
+						Copy this token now, it won't be shown again.
 					</p>
 					<div class="flex items-center gap-2">
 						<code class="bg-muted flex-1 rounded px-2 py-1.5 font-mono text-xs break-all">{freshToken}</code>
@@ -482,7 +482,7 @@
 		<Card.Header>
 			<Card.Title class="text-base">Audit log</Card.Title>
 			<Card.Description>
-				Every state-changing action, newest first — who (admin session or API token), from where,
+				Every state-changing action, newest first, who (admin session or API token), from where,
 				and what. <button class="underline" onclick={loadAudit}>Refresh</button>
 			</Card.Description>
 		</Card.Header>

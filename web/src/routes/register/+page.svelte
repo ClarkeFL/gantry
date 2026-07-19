@@ -24,7 +24,7 @@
 		err = '';
 		try {
 			await api('/register', { method: 'POST', body: JSON.stringify({ email, password }) });
-			toast.success('Welcome! Now enable 2FA in Settings — this panel is public-facing.', { duration: 10000 });
+			toast.success('Welcome! Now enable 2FA in Settings, this panel is public-facing.', { duration: 10000 });
 			goto('/settings');
 		} catch (e) {
 			err = e instanceof Error ? e.message : String(e);
@@ -40,7 +40,7 @@
 			<Card.Title class="flex items-center gap-2 text-2xl">
 				<AnchorIcon class="text-primary size-6" /> gantry
 			</Card.Title>
-			<Card.Description>Create your admin account — this runs once, on first setup.</Card.Description>
+			<Card.Description>Create your admin account, this runs once, on first setup.</Card.Description>
 		</Card.Header>
 		<Card.Content>
 			<form onsubmit={submit} class="grid gap-4">
