@@ -9,6 +9,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import CronInput from '$lib/components/cron-input.svelte';
 	import EnvEditor from '$lib/components/env-editor.svelte';
+	import TimelineChart from '$lib/components/timeline-chart.svelte';
 	import { ago, fmtDate } from '$lib/dates';
 	import { userTzFull, serverTzLabel } from '$lib/server-info.svelte';
 	import { Label } from '$lib/components/ui/label';
@@ -78,6 +79,41 @@
 	let jobs = $state<Job[]>([]);
 	let savingCron = $state(false);
 
+	// cron run history timeline
+	type CronRun = { t: number; ok: boolean; command: string };
+	let cronRuns = $state<CronRun[]>([]);
+	let cronHours = $state(168);
+	let cronBucket = $state(-1);
+	let cronLoadedAt = $state(Date.now());
+	const cronRange = $derived.by(() => ({ start: cronLoadedAt - cronHours * 3600_000, end: cronLoadedAt }));
+	const cronBuckets = $derived.by(() => {
+		const b = Array.from({ length: HIST_BUCKETS }, () => ({ total: 0, red: 0, amber: 0 }));
+		const span = (cronRange.end - cronRange.start) / HIST_BUCKETS;
+		for (const run of cronRuns) {
+			const i = Math.min(HIST_BUCKETS - 1, Math.max(0, Math.floor((run.t - cronRange.start) / span)));
+			b[i].total++;
+			if (!run.ok) b[i].red++;
+		}
+		return b;
+	});
+	const cronBucketRuns = $derived.by(() => {
+		if (cronBucket < 0) return [];
+		const span = (cronRange.end - cronRange.start) / HIST_BUCKETS;
+		const s = cronRange.start + cronBucket * span;
+		return cronRuns.filter((r) => r.t >= s && r.t < s + span).reverse();
+	});
+
+	async function loadCronHistory() {
+		try {
+			const d = await api(`/apps/${name}/cron/history?hours=${cronHours}`);
+			cronRuns = d.runs ?? [];
+			cronLoadedAt = Date.now();
+			cronBucket = -1;
+		} catch (e) {
+			toast.error(msg(e));
+		}
+	}
+
 	// category
 	let category = $state('');
 	let savingCategory = $state(false);
@@ -145,7 +181,6 @@
 		}
 		return b;
 	});
-	const histMax = $derived(Math.max(1, ...histBuckets.map((b) => b.total)));
 	const visibleHist = $derived.by(() => {
 		let out = histLines;
 		if (histBucket >= 0) {
@@ -274,6 +309,9 @@
 	$effect(() => {
 		void visibleHist.length;
 		if (logEl && logAtBottom) logEl.scrollTop = logEl.scrollHeight;
+	});
+	$effect(() => {
+		if (tab === 'cron') loadCronHistory();
 	});
 
 	async function changeRange() {
@@ -1148,7 +1186,52 @@
 				</Card.Root>
 			</Tabs.Content>
 
-			<Tabs.Content value="cron" class="mt-4">
+			<Tabs.Content value="cron" class="mt-4 grid gap-4">
+				{#if jobs.some((j) => j.id)}
+					<div class="grid gap-3">
+						<div class="flex flex-wrap items-center gap-2">
+							<h3 class="text-sm font-medium">Run history</h3>
+							<select
+								class="border-input text-muted-foreground h-7 rounded-md border bg-transparent px-2 text-xs"
+								bind:value={cronHours}
+							>
+								<option value={24}>Last 24 hours</option>
+								<option value={168}>Last 7 days</option>
+								<option value={720}>Last 30 days</option>
+							</select>
+							<span class="text-muted-foreground ml-auto text-xs">
+								{cronRuns.length} runs, {cronRuns.filter((r) => !r.ok).length} failed
+							</span>
+						</div>
+						<TimelineChart
+							buckets={cronBuckets}
+							start={cronRange.start}
+							end={cronRange.end}
+							bind:selected={cronBucket}
+							color="#10b981"
+							format={(t) => histTime(t, true)}
+							label="Cron runs over time, failures in red"
+						/>
+						{#if cronBucketRuns.length}
+							<div class="divide-border overflow-hidden rounded-lg border divide-y">
+								{#each cronBucketRuns as run (run.t + run.command)}
+									<div class="bg-muted/30 flex items-center gap-3 px-3 py-2">
+										<span
+											class="size-2 shrink-0 rounded-full {run.ok ? 'bg-emerald-500' : 'bg-red-500'}"
+										></span>
+										<span class="text-muted-foreground shrink-0 font-mono text-xs">{histTime(run.t, true)}</span>
+										<span class="truncate font-mono text-xs">{run.command}</span>
+										{#if !run.ok}
+											<span class="ml-auto rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-500">
+												failed
+											</span>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 				<Card.Root>
 					<Card.Header>
 						<Card.Title class="text-base">Scheduled jobs</Card.Title>
@@ -1247,41 +1330,14 @@
 					</span>
 				</div>
 
-				<div class="rounded-lg border p-3">
-						<svg viewBox="0 0 480 64" preserveAspectRatio="none" class="h-16 w-full" role="img" aria-label="Log volume over time, colored by severity">
-							{#each histBuckets as b, i (i)}
-								{@const h = (b.total / histMax) * 56}
-								{@const he = b.total ? (b.e / b.total) * h : 0}
-								{@const hw = b.total ? (b.w / b.total) * h : 0}
-								<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-								<g
-									class="cursor-pointer"
-									opacity={histBucket === -1 || histBucket === i ? 1 : 0.35}
-									onclick={() => (histBucket = histBucket === i ? -1 : i)}
-								>
-									<rect x={i * 10 + 1.5} y="0" width="7" height="64" fill="transparent" />
-									{#if b.total}
-										<rect x={i * 10 + 1.5} y={60 - h} width="7" height={h - he - hw} rx="1" fill="#8b8bef" />
-										{#if hw}<rect x={i * 10 + 1.5} y={60 - he - hw} width="7" height={hw} fill="#f59e0b" />{/if}
-										{#if he}<rect x={i * 10 + 1.5} y={60 - he} width="7" height={he} fill="#ef4444" />{/if}
-									{:else}
-										<rect x={i * 10 + 1.5} y="58" width="7" height="2" rx="1" fill="#8b8bef" opacity="0.35" />
-									{/if}
-								</g>
-							{/each}
-						</svg>
-						<div class="text-muted-foreground flex justify-between font-mono text-[10px]">
-							<span>{histTime(histRange.start, true)}</span>
-							<span>{histTime(histRange.start + (histRange.end - histRange.start) / 2, true)}</span>
-							<span>{histTime(histRange.end, true)}</span>
-						</div>
-						{#if histBucket >= 0}
-							<button class="text-muted-foreground hover:text-foreground mt-1 text-xs underline" onclick={() => (histBucket = -1)}>
-								Showing {histTime(histRange.start + histBucket * histRange.span, true)} to
-								{histTime(histRange.start + (histBucket + 1) * histRange.span, true)}, click to clear
-							</button>
-						{/if}
-					</div>
+				<TimelineChart
+					buckets={histBuckets.map((b) => ({ total: b.total, red: b.e, amber: b.w }))}
+					start={histRange.start}
+					end={histRange.end}
+					bind:selected={histBucket}
+					format={(t) => histTime(t, true)}
+					label="Log volume over time, colored by severity"
+				/>
 				<div class="relative">
 					<div
 						bind:this={logEl}

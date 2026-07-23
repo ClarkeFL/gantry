@@ -3,10 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Panel-managed cron: jobs live in meta.json (source of truth); each save
@@ -108,6 +112,64 @@ func writeCronFile(app string, jobs []cronJob) error {
 		fmt.Fprintf(&b, "%s root sh -c '%s'\n", j.Schedule, inner)
 	}
 	return os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+type cronRun struct {
+	T       int64  `json:"t"` // unix ms
+	OK      bool   `json:"ok"`
+	Command string `json:"command"`
+}
+
+// handleCronHistory returns every logged run of the app's cron jobs in the
+// past N hours, for the timeline on the Cron tab.
+func handleCronHistory(w http.ResponseWriter, r *http.Request) {
+	name, ok := appName(w, r)
+	if !ok {
+		return
+	}
+	hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
+	if hours < 1 || hours > 24*30 {
+		hours = 24 * 7
+	}
+	from := time.Now().Add(-time.Duration(hours) * time.Hour)
+	metaMu.Lock()
+	jobs := make([]cronJob, len(getMeta(name).Jobs))
+	copy(jobs, getMeta(name).Jobs)
+	metaMu.Unlock()
+	runs := []cronRun{}
+	if mockMode {
+		// fabricated history: hourly runs for the first job, daily for the
+		// rest, with an occasional failure
+		for ji, j := range jobs {
+			step := time.Hour
+			if ji > 0 {
+				step = 24 * time.Hour
+			}
+			for t := from.Truncate(step); t.Before(time.Now()); t = t.Add(step) {
+				runs = append(runs, cronRun{t.UnixMilli(), (t.Unix()/int64(step.Seconds()))%9 != 3, j.Command})
+			}
+		}
+	} else {
+		for _, j := range jobs {
+			b, err := os.ReadFile(filepath.Join(cronLogDir(), name+"-"+j.ID+".log"))
+			if err != nil {
+				continue
+			}
+			for _, line := range strings.Split(string(b), "\n") {
+				ts, rest, found := strings.Cut(strings.TrimSpace(line), " ")
+				if !found {
+					continue
+				}
+				t, err := time.Parse(time.RFC3339, ts)
+				if err != nil || t.Before(from) {
+					continue
+				}
+				runs = append(runs, cronRun{t.UnixMilli(), strings.Contains(rest, "exit=0"), j.Command})
+			}
+		}
+	}
+	sort.Slice(runs, func(i, j int) bool { return runs[i].T < runs[j].T })
+	writeJSON(w, map[string]any{"runs": runs})
 }
 
 func lastRun(app, id string) string {
