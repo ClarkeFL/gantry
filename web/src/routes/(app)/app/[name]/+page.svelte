@@ -19,7 +19,6 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import RotateCwIcon from '@lucide/svelte/icons/rotate-cw';
-	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SquareIcon from '@lucide/svelte/icons/square';
 	import PlayIcon from '@lucide/svelte/icons/play';
 	import RocketIcon from '@lucide/svelte/icons/rocket';
@@ -108,15 +107,12 @@
 	let histLogText = $state('');
 	let histLog = $state<DeployEntry | null>(null);
 
-	// logs
-	let logLines = $state<string[]>([]);
-	let logEl = $state<HTMLElement | null>(null);
-	let stopLogs: (() => void) | null = null;
-
-	// log history
+	// logs: stored history merged with the live tail in one view
 	type HistLine = { t: number; line: string; sev?: string };
 	const HIST_BUCKETS = 48;
-	let logMode = $state<'live' | 'history'>('live');
+	let logEl = $state<HTMLElement | null>(null);
+	let stopLogs: (() => void) | null = null;
+	let logAtBottom = $state(true); // follow the tail unless the user scrolled up
 	let histLines = $state<HistLine[]>([]);
 	let histLoading = $state(false);
 	let histHours = $state(24);
@@ -126,10 +122,18 @@
 	let histBucket = $state(-1);
 	let histRetention = $state(7);
 
+	// severity heuristics, mirrors the server-side classifier for live lines
+	const jsErrRe = /\b(error|exception|fatal|panic|traceback)\b|\s5\d\d\s/i;
+	const jsWarnRe = /\bwarn(ing)?\b|\s4\d\d\s/i;
+	function classifyLive(line: string): string {
+		return jsErrRe.test(line) ? 'e' : jsWarnRe.test(line) ? 'w' : '';
+	}
+
 	const histRange = $derived.by(() => {
-		const end = histLoadedAt;
-		const start = end - histHours * 3600_000;
-		return { start, end, span: (end - start) / HIST_BUCKETS };
+		// the end extends as live lines arrive so the last bar keeps filling
+		const end = Math.max(histLoadedAt, histLines[histLines.length - 1]?.t ?? 0);
+		const start = histLoadedAt - histHours * 3600_000;
+		return { start, end, span: Math.max(1, (end - start) / HIST_BUCKETS) };
 	});
 	const histBuckets = $derived.by(() => {
 		const b = Array.from({ length: HIST_BUCKETS }, () => ({ total: 0, w: 0, e: 0 }));
@@ -260,22 +264,39 @@
 	});
 
 	$effect(() => {
-		if (tab === 'logs' && logMode === 'live' && !stopLogs) {
-			logLines = [];
-			stopLogs = stream(`/apps/${name}/logs`, (l) => {
-				logLines.push(l);
-			});
-		} else if ((tab !== 'logs' || logMode !== 'live') && stopLogs) {
+		if (tab === 'logs' && !stopLogs) {
+			loadHistory().then(startLogTail);
+		} else if (tab !== 'logs' && stopLogs) {
 			stopLogs();
 			stopLogs = null;
 		}
 	});
 	$effect(() => {
-		if (tab === 'logs' && logMode === 'history') loadHistory();
+		void visibleHist.length;
+		if (logEl && logAtBottom) logEl.scrollTop = logEl.scrollHeight;
 	});
-	$effect(() => {
-		if (logLines.length && logEl) logEl.scrollTop = logEl.scrollHeight;
-	});
+
+	async function changeRange() {
+		stopLogs?.();
+		stopLogs = null;
+		await loadHistory();
+		startLogTail();
+	}
+
+	function startLogTail() {
+		if (stopLogs || tab !== 'logs') return;
+		let lastT = histLines[histLines.length - 1]?.t ?? 0;
+		stopLogs = stream(`/apps/${name}/logs`, (raw) => {
+			const sp = raw.indexOf(' ');
+			const parsed = sp > 0 ? Date.parse(raw.slice(0, sp)) : NaN;
+			const t = isNaN(parsed) ? Date.now() : parsed;
+			if (t <= lastT) return; // overlap with stored history or the tail's backfill
+			lastT = t;
+			const line = isNaN(parsed) ? raw : raw.slice(sp + 1);
+			histLines.push({ t, line, sev: classifyLive(line) });
+			if (histLines.length > 3000) histLines.shift();
+		});
+	}
 	$effect(() => {
 		if (liveDeploy?.lines.length && deployLogEl) {
 			deployLogEl.scrollTop = deployLogEl.scrollHeight;
@@ -1197,66 +1218,40 @@
 
 			<Tabs.Content value="logs" class="mt-4 grid gap-3">
 				<div class="flex flex-wrap items-center gap-2">
-					<div class="flex overflow-hidden rounded-md border">
-						<button
-							class="px-3 py-1.5 text-xs font-medium {logMode === 'live' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'}"
-							onclick={() => (logMode = 'live')}
-						>
-							Live
-						</button>
-						<button
-							class="border-l px-3 py-1.5 text-xs font-medium {logMode === 'history' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'}"
-							onclick={() => (logMode = 'history')}
-						>
-							History
-						</button>
-					</div>
-					{#if logMode === 'history'}
-						<select
-							class="border-input text-muted-foreground h-7 rounded-md border bg-transparent px-2 text-xs"
-							bind:value={histHours}
-						>
-							<option value={1}>Last hour</option>
-							<option value={6}>Last 6 hours</option>
-							<option value={24}>Last 24 hours</option>
-							<option value={72}>Last 3 days</option>
-							<option value={168}>Last 7 days</option>
-						</select>
-						<div class="flex overflow-hidden rounded-md border">
-							{#each [['', 'All'], ['w', 'Warnings'], ['e', 'Errors']] as [v, label] (v)}
-								<button
-									class="px-2.5 py-1.5 text-xs font-medium not-first:border-l {histSev === v
-										? 'bg-accent text-accent-foreground'
-										: 'text-muted-foreground hover:text-foreground'}"
-									onclick={() => (histSev = v)}
-								>
-									{label}
-								</button>
-							{/each}
-						</div>
-						<Input bind:value={histFilter} placeholder="Filter…" class="h-7 w-40 text-xs" />
-						<Button variant="outline" size="sm" class="h-7" onclick={loadHistory} disabled={histLoading}>
-							<RefreshCwIcon class="size-3.5 {histLoading ? 'animate-spin' : ''}" />
-						</Button>
-						<span class="text-muted-foreground ml-auto text-xs">
-							kept for {histRetention} days
-						</span>
-					{/if}
-				</div>
-
-				{#if logMode === 'live'}
-					<div
-						bind:this={logEl}
-						class="bg-card h-[32rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5"
+					<span class="flex items-center gap-1.5 text-xs font-medium text-emerald-500">
+						<span class="size-1.5 animate-pulse rounded-full bg-emerald-500"></span>
+						live
+					</span>
+					<select
+						class="border-input text-muted-foreground h-7 rounded-md border bg-transparent px-2 text-xs"
+						bind:value={histHours}
+						onchange={changeRange}
 					>
-						{#each logLines as line, i (i)}
-							<div class="whitespace-pre-wrap">{line}</div>
-						{:else}
-							<p class="text-muted-foreground">Waiting for logs…</p>
+						<option value={1}>Last hour</option>
+						<option value={6}>Last 6 hours</option>
+						<option value={24}>Last 24 hours</option>
+						<option value={72}>Last 3 days</option>
+						<option value={168}>Last 7 days</option>
+					</select>
+					<div class="flex overflow-hidden rounded-md border">
+						{#each [['', 'All'], ['w', 'Warnings'], ['e', 'Errors']] as [v, label] (v)}
+							<button
+								class="px-2.5 py-1.5 text-xs font-medium not-first:border-l {histSev === v
+									? 'bg-accent text-accent-foreground'
+									: 'text-muted-foreground hover:text-foreground'}"
+								onclick={() => (histSev = v)}
+							>
+								{label}
+							</button>
 						{/each}
 					</div>
-				{:else}
-					<div class="rounded-lg border p-3">
+					<Input bind:value={histFilter} placeholder="Filter…" class="h-7 w-40 text-xs" />
+					<span class="text-muted-foreground ml-auto text-xs">
+						kept for {histRetention} days
+					</span>
+				</div>
+
+				<div class="rounded-lg border p-3">
 						<svg viewBox="0 0 480 64" preserveAspectRatio="none" class="h-16 w-full" role="img" aria-label="Log volume over time, colored by severity">
 							{#each histBuckets as b, i (i)}
 								{@const h = (b.total / histMax) * 56}
@@ -1291,7 +1286,12 @@
 							</button>
 						{/if}
 					</div>
-					<div class="bg-card h-[26rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5">
+				<div class="relative">
+					<div
+						bind:this={logEl}
+						onscroll={() => (logAtBottom = !logEl || logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 60)}
+						class="bg-card h-[26rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5"
+					>
 						{#each visibleHist as l (l.t + l.line)}
 							<div class="flex gap-3 whitespace-pre-wrap {l.sev === 'e' ? 'text-red-400' : l.sev === 'w' ? 'text-amber-400' : ''}">
 								<span class="text-muted-foreground shrink-0">{histTime(l.t)}</span>
@@ -1307,7 +1307,20 @@
 							</p>
 						{/each}
 					</div>
-				{/if}
+					{#if !logAtBottom || histBucket >= 0}
+						<Button
+							size="sm"
+							class="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-lg"
+							onclick={() => {
+								histBucket = -1;
+								logAtBottom = true;
+								if (logEl) logEl.scrollTop = logEl.scrollHeight;
+							}}
+						>
+							<ChevronDownIcon class="size-4" /> Jump to live
+						</Button>
+					{/if}
+				</div>
 			</Tabs.Content>
 		</Tabs.Root>
 	{/if}
