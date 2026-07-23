@@ -313,6 +313,65 @@ func handleProjectGroupCreate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
+// handleProjectGroupRename renames a group and moves its apps with it.
+func handleProjectGroupRename(w http.ResponseWriter, r *http.Request) {
+	project, ok := projectName(w, r)
+	if !ok {
+		return
+	}
+	var req struct{ From, To string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	req.From, req.To = strings.TrimSpace(req.From), strings.TrimSpace(req.To)
+	if req.From == "" || req.To == "" {
+		httpErr(w, 400, "group name required")
+		return
+	}
+	settingsMu.Lock()
+	found := false
+	for i, g := range settings.ProjectGroups[project] {
+		if strings.EqualFold(g, req.To) && !strings.EqualFold(g, req.From) {
+			settingsMu.Unlock()
+			httpErr(w, 409, "a group with that name already exists")
+			return
+		}
+		if strings.EqualFold(g, req.From) {
+			settings.ProjectGroups[project][i] = req.To
+			found = true
+		}
+	}
+	if !found {
+		settingsMu.Unlock()
+		httpErr(w, 404, "no such group")
+		return
+	}
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	metaMu.Lock()
+	changed := false
+	for _, m := range meta {
+		if strings.EqualFold(m.Category, project) && strings.EqualFold(m.Group, req.From) {
+			m.Group = req.To
+			changed = true
+		}
+	}
+	if changed {
+		err = saveMeta()
+	}
+	metaMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
 func handleProjectGroupDelete(w http.ResponseWriter, r *http.Request) {
 	project, ok := projectName(w, r)
 	if !ok {

@@ -92,6 +92,7 @@ func main() {
 		"GET /api/projects/{name}":           handleProjectGet,
 		"POST /api/projects/{name}/env":      handleProjectEnvSet,
 		"POST /api/projects/{name}/groups":   handleProjectGroupCreate,
+		"PUT /api/projects/{name}/groups":    handleProjectGroupRename,
 		"DELETE /api/projects/{name}/groups": handleProjectGroupDelete,
 		"POST /api/apps/{name}/group":        handleAppGroup,
 		"GET /api/services":                  handleServicesGet,

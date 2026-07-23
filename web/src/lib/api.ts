@@ -9,7 +9,7 @@ export async function api<T = any>(path: string, opts: RequestInit = {}): Promis
 	}
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}) as any);
-		throw new Error(body.error ?? res.statusText);
+		throw new Error(body.error || res.statusText || `request failed (HTTP ${res.status})`);
 	}
 	return res.json();
 }

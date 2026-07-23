@@ -55,6 +55,12 @@
 	let newGroupName = $state('');
 	let creatingGroup = $state(false);
 
+	// rename group dialog
+	let renameGroupOpen = $state(false);
+	let renameGroupFrom = $state('');
+	let renameGroupTo = $state('');
+	let renamingGroup = $state(false);
+
 	// rename dialog
 	let renameOpen = $state(false);
 	let renameTo = $state('');
@@ -202,6 +208,29 @@
 			toast.error(msg(e));
 		} finally {
 			creatingGroup = false;
+		}
+	}
+
+	async function renameGroup(e: SubmitEvent) {
+		e.preventDefault();
+		const to = renameGroupTo.trim();
+		if (!to || to === renameGroupFrom) {
+			renameGroupOpen = false;
+			return;
+		}
+		renamingGroup = true;
+		try {
+			await api(`/projects/${encodeURIComponent(project)}/groups`, {
+				method: 'PUT',
+				body: JSON.stringify({ from: renameGroupFrom, to })
+			});
+			toast.success(`Renamed to ${to}`);
+			renameGroupOpen = false;
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			renamingGroup = false;
 		}
 	}
 
@@ -421,20 +450,7 @@
 			</a>
 		{/snippet}
 
-		<div class="mb-3 flex items-center gap-2 border-b pb-2">
-			<BoxIcon class="text-muted-foreground size-4" />
-			<h2 class="text-lg font-semibold tracking-tight">Apps</h2>
-			<button
-				class="text-muted-foreground hover:text-foreground"
-				onclick={() => {
-					newAppGroup = '';
-					newAppOpen = true;
-				}}
-				title="New app in {project}"
-				aria-label="New app in {project}"
-			>
-				<PlusIcon class="size-4" />
-			</button>
+		<div class="mb-3 flex items-center border-b pb-2">
 			<Button variant="ghost" size="sm" class="text-muted-foreground ml-auto" onclick={() => (newGroupOpen = true)}>
 				<FolderPlusIcon class="size-4" /> New group
 			</Button>
@@ -451,6 +467,18 @@
 		{#each groups as g (g)}
 			<div class="mb-3 flex items-center gap-2">
 				<h3 class="text-muted-foreground text-sm font-medium">{g}</h3>
+				<button
+					class="text-muted-foreground hover:text-foreground"
+					onclick={() => {
+						renameGroupFrom = g;
+						renameGroupTo = g;
+						renameGroupOpen = true;
+					}}
+					title="Rename group"
+					aria-label="Rename group {g}"
+				>
+					<PencilIcon class="size-3.5" />
+				</button>
 				<button
 					class="text-muted-foreground hover:text-destructive"
 					onclick={() => deleteGroup(g)}
@@ -606,6 +634,19 @@
 			</Dialog.Description>
 		</Dialog.Header>
 		<EnvEditor {env} restartLabel="Restart apps" onsave={saveEnv} />
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={renameGroupOpen}>
+	<Dialog.Content class="max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>Rename group</Dialog.Title>
+			<Dialog.Description>Apps in the group move with it.</Dialog.Description>
+		</Dialog.Header>
+		<form onsubmit={renameGroup} class="grid gap-4">
+			<Input bind:value={renameGroupTo} required placeholder={renameGroupFrom} />
+			<Button type="submit" disabled={renamingGroup}>{renamingGroup ? 'Renaming…' : 'Rename'}</Button>
+		</form>
 	</Dialog.Content>
 </Dialog.Root>
 

@@ -30,6 +30,18 @@ var (
 	keyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
+// errText prefers dokku's printed output, falling back to the Go error so a
+// failure never surfaces as an empty message.
+func errText(out string, err error) string {
+	if strings.TrimSpace(out) != "" {
+		return out
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return "command failed"
+}
+
 func appName(w http.ResponseWriter, r *http.Request) (string, bool) {
 	name := r.PathValue("name")
 	if !appRe.MatchString(name) {
@@ -337,7 +349,7 @@ func handlePs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if out, err := dokku("ps:"+req.Action, name); err != nil {
-		httpErr(w, 500, out)
+		httpErr(w, 500, errText(out, err))
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
@@ -1007,7 +1019,7 @@ func handleAppDestroy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if out, err := dokku("--force", "apps:destroy", name); err != nil {
-		httpErr(w, 500, out)
+		httpErr(w, 500, errText(out, err))
 		return
 	}
 	writeCronFile(name, nil) // removes /etc/cron.d/gantry-<name>
@@ -1053,7 +1065,7 @@ func handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if out, err := dokku("apps:create", req.Name); err != nil {
-		httpErr(w, 500, out)
+		httpErr(w, 500, errText(out, err))
 		return
 	}
 	if c := strings.TrimSpace(req.Category); c != "" {
