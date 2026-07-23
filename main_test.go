@@ -106,6 +106,33 @@ func TestProjectEnvApply(t *testing.T) {
 	}
 }
 
+func TestLogClassifyAndParse(t *testing.T) {
+	cases := map[string]string{
+		"app[web.1]: GET /health 200 10ms":        "",
+		"app[web.1]: WARN slow query took 1.9s":   "w",
+		"app[web.1]: GET /missing 404 3ms":        "w",
+		"app[web.1]: ERROR upstream timeout 502 ": "e",
+		"app[web.1]: panic: nil pointer":          "e",
+		"app[web.1]: Unhandled Exception in job":  "e",
+	}
+	for line, want := range cases {
+		if got := classifyLogLine(line); got != want {
+			t.Errorf("classify(%q) = %q, want %q", line, got, want)
+		}
+	}
+	ts, ok := lineTime("2026-07-23T18:57:03+10:00 app[web.1]: hi")
+	if !ok || ts.Year() != 2026 {
+		t.Errorf("lineTime failed on RFC3339 prefix: %v %v", ts, ok)
+	}
+	tsn, ok := lineTime("2026-07-23T18:57:03.123456789Z app[web.1]: hi")
+	if !ok || tsn.Nanosecond() == 0 {
+		t.Errorf("lineTime failed on RFC3339Nano prefix: %v %v", tsn, ok)
+	}
+	if _, ok := lineTime("no timestamp here"); ok {
+		t.Error("lineTime should reject lines without a timestamp")
+	}
+}
+
 func TestNewerVersion(t *testing.T) {
 	cases := []struct {
 		latest, current string

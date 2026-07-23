@@ -1013,6 +1013,7 @@ func handleAppDestroy(w http.ResponseWriter, r *http.Request) {
 	writeCronFile(name, nil) // removes /etc/cron.d/gantry-<name>
 	os.Remove(deployLogPath(name))
 	os.RemoveAll(deployDir(name))
+	os.RemoveAll(appLogDir(name))
 	metaMu.Lock()
 	delete(meta, name)
 	saveMeta()

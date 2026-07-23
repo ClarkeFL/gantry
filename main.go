@@ -69,6 +69,9 @@ func main() {
 		os.WriteFile(filepath.Join(cronDir, "gantry-prune"), []byte(prune), 0o644)
 	}
 	startStatsSampler()
+	if !mockMode {
+		go collectAppLogs()
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/register", handleRegister)
@@ -120,6 +123,7 @@ func main() {
 		"POST /api/apps/{name}/category":     handleCategory,
 		"POST /api/apps/{name}/ps":           handlePs,
 		"GET /api/apps/{name}/logs":          handleLogs,
+		"GET /api/apps/{name}/logs/history":  handleLogHistory,
 		"GET /api/apps/{name}/logs/deploy":   handleDeployLog,
 		"GET /api/apps/{name}/deploys":       handleDeploys,
 		"POST /api/apps/{name}/deploy":       handleDeploy,

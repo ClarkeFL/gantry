@@ -19,6 +19,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import RotateCwIcon from '@lucide/svelte/icons/rotate-cw';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SquareIcon from '@lucide/svelte/icons/square';
 	import PlayIcon from '@lucide/svelte/icons/play';
 	import RocketIcon from '@lucide/svelte/icons/rocket';
@@ -112,6 +113,69 @@
 	let logEl = $state<HTMLElement | null>(null);
 	let stopLogs: (() => void) | null = null;
 
+	// log history
+	type HistLine = { t: number; line: string; sev?: string };
+	const HIST_BUCKETS = 48;
+	let logMode = $state<'live' | 'history'>('live');
+	let histLines = $state<HistLine[]>([]);
+	let histLoading = $state(false);
+	let histHours = $state(24);
+	let histLoadedAt = $state(Date.now());
+	let histFilter = $state('');
+	let histSev = $state('');
+	let histBucket = $state(-1);
+	let histRetention = $state(7);
+
+	const histRange = $derived.by(() => {
+		const end = histLoadedAt;
+		const start = end - histHours * 3600_000;
+		return { start, end, span: (end - start) / HIST_BUCKETS };
+	});
+	const histBuckets = $derived.by(() => {
+		const b = Array.from({ length: HIST_BUCKETS }, () => ({ total: 0, w: 0, e: 0 }));
+		for (const l of histLines) {
+			const i = Math.min(HIST_BUCKETS - 1, Math.max(0, Math.floor((l.t - histRange.start) / histRange.span)));
+			b[i].total++;
+			if (l.sev === 'w') b[i].w++;
+			else if (l.sev === 'e') b[i].e++;
+		}
+		return b;
+	});
+	const histMax = $derived(Math.max(1, ...histBuckets.map((b) => b.total)));
+	const visibleHist = $derived.by(() => {
+		let out = histLines;
+		if (histBucket >= 0) {
+			const s = histRange.start + histBucket * histRange.span;
+			out = out.filter((l) => l.t >= s && l.t < s + histRange.span);
+		}
+		if (histSev) out = out.filter((l) => l.sev === histSev);
+		const q = histFilter.trim().toLowerCase();
+		if (q) out = out.filter((l) => l.line.toLowerCase().includes(q));
+		return out.slice(-500);
+	});
+
+	async function loadHistory() {
+		histLoading = true;
+		histBucket = -1;
+		try {
+			const d = await api(`/apps/${name}/logs/history?hours=${histHours}`);
+			histLines = d.lines ?? [];
+			histRetention = d.retentionDays ?? 7;
+			histLoadedAt = Date.now();
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			histLoading = false;
+		}
+	}
+
+	function histTime(t: number, withDate = histHours > 24) {
+		const d = new Date(t);
+		const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+		if (!withDate) return time;
+		return d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' }) + ' ' + time;
+	}
+
 	// live deploy (shown as a card on the Deploys tab — no modal)
 	type LiveDeploy = {
 		started: string;
@@ -196,15 +260,18 @@
 	});
 
 	$effect(() => {
-		if (tab === 'logs' && !stopLogs) {
+		if (tab === 'logs' && logMode === 'live' && !stopLogs) {
 			logLines = [];
 			stopLogs = stream(`/apps/${name}/logs`, (l) => {
 				logLines.push(l);
 			});
-		} else if (tab !== 'logs' && stopLogs) {
+		} else if ((tab !== 'logs' || logMode !== 'live') && stopLogs) {
 			stopLogs();
 			stopLogs = null;
 		}
+	});
+	$effect(() => {
+		if (tab === 'logs' && logMode === 'history') loadHistory();
 	});
 	$effect(() => {
 		if (logLines.length && logEl) logEl.scrollTop = logEl.scrollHeight;
@@ -1128,17 +1195,119 @@
 				</Card.Root>
 			</Tabs.Content>
 
-			<Tabs.Content value="logs" class="mt-4">
-				<div
-					bind:this={logEl}
-					class="bg-card h-[32rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5"
-				>
-					{#each logLines as line, i (i)}
-						<div class="whitespace-pre-wrap">{line}</div>
-					{:else}
-						<p class="text-muted-foreground">Waiting for logs…</p>
-					{/each}
+			<Tabs.Content value="logs" class="mt-4 grid gap-3">
+				<div class="flex flex-wrap items-center gap-2">
+					<div class="flex overflow-hidden rounded-md border">
+						<button
+							class="px-3 py-1.5 text-xs font-medium {logMode === 'live' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'}"
+							onclick={() => (logMode = 'live')}
+						>
+							Live
+						</button>
+						<button
+							class="border-l px-3 py-1.5 text-xs font-medium {logMode === 'history' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'}"
+							onclick={() => (logMode = 'history')}
+						>
+							History
+						</button>
+					</div>
+					{#if logMode === 'history'}
+						<select
+							class="border-input text-muted-foreground h-7 rounded-md border bg-transparent px-2 text-xs"
+							bind:value={histHours}
+						>
+							<option value={1}>Last hour</option>
+							<option value={6}>Last 6 hours</option>
+							<option value={24}>Last 24 hours</option>
+							<option value={72}>Last 3 days</option>
+							<option value={168}>Last 7 days</option>
+						</select>
+						<div class="flex overflow-hidden rounded-md border">
+							{#each [['', 'All'], ['w', 'Warnings'], ['e', 'Errors']] as [v, label] (v)}
+								<button
+									class="px-2.5 py-1.5 text-xs font-medium not-first:border-l {histSev === v
+										? 'bg-accent text-accent-foreground'
+										: 'text-muted-foreground hover:text-foreground'}"
+									onclick={() => (histSev = v)}
+								>
+									{label}
+								</button>
+							{/each}
+						</div>
+						<Input bind:value={histFilter} placeholder="Filter…" class="h-7 w-40 text-xs" />
+						<Button variant="outline" size="sm" class="h-7" onclick={loadHistory} disabled={histLoading}>
+							<RefreshCwIcon class="size-3.5 {histLoading ? 'animate-spin' : ''}" />
+						</Button>
+						<span class="text-muted-foreground ml-auto text-xs">
+							kept for {histRetention} days
+						</span>
+					{/if}
 				</div>
+
+				{#if logMode === 'live'}
+					<div
+						bind:this={logEl}
+						class="bg-card h-[32rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5"
+					>
+						{#each logLines as line, i (i)}
+							<div class="whitespace-pre-wrap">{line}</div>
+						{:else}
+							<p class="text-muted-foreground">Waiting for logs…</p>
+						{/each}
+					</div>
+				{:else}
+					<div class="rounded-lg border p-3">
+						<svg viewBox="0 0 480 64" preserveAspectRatio="none" class="h-16 w-full" role="img" aria-label="Log volume over time, colored by severity">
+							{#each histBuckets as b, i (i)}
+								{@const h = (b.total / histMax) * 56}
+								{@const he = b.total ? (b.e / b.total) * h : 0}
+								{@const hw = b.total ? (b.w / b.total) * h : 0}
+								<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+								<g
+									class="cursor-pointer"
+									opacity={histBucket === -1 || histBucket === i ? 1 : 0.35}
+									onclick={() => (histBucket = histBucket === i ? -1 : i)}
+								>
+									<rect x={i * 10 + 1.5} y="0" width="7" height="64" fill="transparent" />
+									{#if b.total}
+										<rect x={i * 10 + 1.5} y={60 - h} width="7" height={h - he - hw} rx="1" fill="#8b8bef" />
+										{#if hw}<rect x={i * 10 + 1.5} y={60 - he - hw} width="7" height={hw} fill="#f59e0b" />{/if}
+										{#if he}<rect x={i * 10 + 1.5} y={60 - he} width="7" height={he} fill="#ef4444" />{/if}
+									{:else}
+										<rect x={i * 10 + 1.5} y="58" width="7" height="2" rx="1" fill="#8b8bef" opacity="0.35" />
+									{/if}
+								</g>
+							{/each}
+						</svg>
+						<div class="text-muted-foreground flex justify-between font-mono text-[10px]">
+							<span>{histTime(histRange.start, true)}</span>
+							<span>{histTime(histRange.start + (histRange.end - histRange.start) / 2, true)}</span>
+							<span>{histTime(histRange.end, true)}</span>
+						</div>
+						{#if histBucket >= 0}
+							<button class="text-muted-foreground hover:text-foreground mt-1 text-xs underline" onclick={() => (histBucket = -1)}>
+								Showing {histTime(histRange.start + histBucket * histRange.span, true)} to
+								{histTime(histRange.start + (histBucket + 1) * histRange.span, true)}, click to clear
+							</button>
+						{/if}
+					</div>
+					<div class="bg-card h-[26rem] overflow-y-auto rounded-lg border p-4 font-mono text-xs leading-5">
+						{#each visibleHist as l (l.t + l.line)}
+							<div class="flex gap-3 whitespace-pre-wrap {l.sev === 'e' ? 'text-red-400' : l.sev === 'w' ? 'text-amber-400' : ''}">
+								<span class="text-muted-foreground shrink-0">{histTime(l.t)}</span>
+								<span>{l.line}</span>
+							</div>
+						{:else}
+							<p class="text-muted-foreground">
+								{histLoading
+									? 'Loading…'
+									: histLines.length
+										? 'Nothing matches the current filters.'
+										: 'No stored logs yet. Gantry records app output from now on, so history fills up as the app runs.'}
+							</p>
+						{/each}
+					</div>
+				{/if}
 			</Tabs.Content>
 		</Tabs.Root>
 	{/if}
