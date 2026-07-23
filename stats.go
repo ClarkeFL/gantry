@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,9 +15,13 @@ import (
 )
 
 type appStat struct {
-	App string `json:"app"`
-	CPU string `json:"cpu"`
-	Mem string `json:"mem"`
+	App        string `json:"app"`
+	CPU        string `json:"cpu"`
+	Mem        string `json:"mem"`
+	MemBytes   int64  `json:"memBytes"`
+	Net        string `json:"net"` // rx+tx rate since the previous sample
+	Containers int    `json:"containers"`
+	IsApp      bool   `json:"isApp"` // links to the app page in the UI
 }
 
 // One point per 5s sample; percents for bounded metrics, B/s for network.
@@ -198,31 +203,124 @@ func readLoad() string {
 	return strings.Join(f[:3], ", ")
 }
 
-// containerStats maps docker usage to dokku app names (<app>.web.1 → <app>).
+// containerLabel groups a docker container name into a display row:
+// "<app>.web.1" → the app, "dokku.postgres.main-db" → "main-db (postgres)",
+// anything else (dokku internals, stray containers) keeps its own name.
+func containerLabel(name string) (label string, isApp bool) {
+	if rest, ok := strings.CutPrefix(name, "dokku."); ok {
+		if typ, svc, ok := strings.Cut(rest, "."); ok {
+			return svc + " (" + typ + ")", false
+		}
+		return name, false
+	}
+	app, _, _ := strings.Cut(name, ".")
+	metaMu.Lock()
+	_, known := meta[app]
+	metaMu.Unlock()
+	return app, known
+}
+
+func parseSize(s string) int64 {
+	units := []struct {
+		suffix string
+		mult   float64
+	}{
+		{"TiB", 1 << 40}, {"GiB", 1 << 30}, {"MiB", 1 << 20}, {"KiB", 1 << 10},
+		{"TB", 1e12}, {"GB", 1e9}, {"MB", 1e6}, {"kB", 1e3}, {"B", 1},
+	}
+	s = strings.TrimSpace(s)
+	for _, u := range units {
+		if n, ok := strings.CutSuffix(s, u.suffix); ok {
+			v, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
+			if err != nil {
+				return 0
+			}
+			return int64(v * u.mult)
+		}
+	}
+	return 0
+}
+
+func fmtBytes(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return strconv.FormatFloat(float64(b)/(1<<30), 'f', 1, 64) + "GiB"
+	case b >= 1<<20:
+		return strconv.FormatInt(b/(1<<20), 10) + "MiB"
+	case b >= 1<<10:
+		return strconv.FormatInt(b/(1<<10), 10) + "KiB"
+	default:
+		return strconv.FormatInt(b, 10) + "B"
+	}
+}
+
+// container network totals from the previous sample, for rate computation.
+// Only the containerStats goroutine touches these.
+var (
+	prevCtrNet   = map[string]int64{}
+	prevCtrNetAt time.Time
+)
+
+// containerStats aggregates docker usage for EVERY container on the server,
+// summed per app / database service, largest memory first.
 func containerStats() []appStat {
 	if mockMode {
-		return []appStat{{"blog", "0.12%", "48MiB / 3.8GiB"}, {"api", "1.03%", "156MiB / 3.8GiB"}}
+		return []appStat{
+			{"api", "1.03%", "156MiB", 156 << 20, "14KiB/s", 2, true},
+			{"main-db (postgres)", "0.40%", "89MiB", 89 << 20, "3KiB/s", 1, false},
+			{"blog", "0.12%", "48MiB", 48 << 20, "1KiB/s", 1, true},
+			{"cache (redis)", "0.08%", "12MiB", 12 << 20, "0B/s", 1, false},
+		}
 	}
-	out, err := exec.Command("docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}").Output()
+	out, err := exec.Command("docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}").Output()
 	if err != nil {
 		return []appStat{}
 	}
-	stats := []appStat{}
-	seen := map[string]bool{}
+	type agg struct {
+		cpu   float64
+		mem   int64
+		net   int64
+		n     int
+		isApp bool
+	}
+	rows := map[string]*agg{}
+	order := []string{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(line, "\t")
-		if len(f) != 3 {
+		if len(f) != 4 {
 			continue
 		}
-		// during a restart the draining old container briefly coexists with
-		// its replacement; one row per app, or the UI gets duplicate keys
-		app, _, _ := strings.Cut(f[0], ".")
-		if seen[app] {
-			continue
+		label, isApp := containerLabel(f[0])
+		a := rows[label]
+		if a == nil {
+			a = &agg{isApp: isApp}
+			rows[label] = a
+			order = append(order, label)
 		}
-		seen[app] = true
-		stats = append(stats, appStat{app, f[1], f[2]})
+		cpu, _ := strconv.ParseFloat(strings.TrimSuffix(f[1], "%"), 64)
+		a.cpu += cpu
+		used, _, _ := strings.Cut(f[2], "/")
+		a.mem += parseSize(used)
+		rx, tx, _ := strings.Cut(f[3], "/")
+		a.net += parseSize(rx) + parseSize(tx)
+		a.n++
 	}
+	elapsed := time.Since(prevCtrNetAt).Seconds()
+	nextNet := make(map[string]int64, len(rows))
+	stats := make([]appStat, 0, len(order))
+	for _, label := range order {
+		a := rows[label]
+		rate := ""
+		if prev, ok := prevCtrNet[label]; ok && elapsed > 0 && a.net >= prev {
+			rate = fmtBytes(int64(float64(a.net-prev)/elapsed)) + "/s"
+		}
+		nextNet[label] = a.net
+		stats = append(stats, appStat{
+			label, strconv.FormatFloat(a.cpu, 'f', 2, 64) + "%", fmtBytes(a.mem), a.mem, rate, a.n, a.isApp,
+		})
+	}
+	prevCtrNet, prevCtrNetAt = nextNet, time.Now()
+	sort.Slice(stats, func(i, j int) bool { return stats[i].MemBytes > stats[j].MemBytes })
 	return stats
 }
 

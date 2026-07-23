@@ -120,7 +120,7 @@
 	{:else}
 		<p class="text-muted-foreground text-sm">No variables set.</p>
 	{/each}
-	<div class="mt-2 flex items-center gap-2">
+	<div class="mt-2 flex flex-wrap items-center gap-2">
 		<Button variant="outline" size="sm" onclick={() => rows.push({ key: '', value: '' })}>
 			<PlusIcon class="size-4" /> Add variable
 		</Button>
@@ -130,7 +130,7 @@
 		<input id={fileId} type="file" accept=".env,text/plain,.txt" class="hidden" onchange={importEnvFile} />
 		<div class="ml-auto flex items-center gap-2">
 			<Switch id="{fileId}-restart" bind:checked={restartAfterSave} />
-			<Label for="{fileId}-restart" class="text-sm">{restartLabel}</Label>
+			<Label for="{fileId}-restart" class="text-sm whitespace-nowrap">{restartLabel}</Label>
 		</div>
 		<Button size="sm" onclick={save} disabled={saving}>
 			{saving ? 'Saving…' : 'Save changes'}

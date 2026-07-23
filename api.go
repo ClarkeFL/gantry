@@ -1043,7 +1043,7 @@ func handleServiceDestroy(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCreateApp(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Name, Category string }
+	var req struct{ Name, Category, Group string }
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpErr(w, 400, "bad request")
 		return
@@ -1058,7 +1058,9 @@ func handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if c := strings.TrimSpace(req.Category); c != "" {
 		metaMu.Lock()
-		getMeta(req.Name).Category = c
+		m := getMeta(req.Name)
+		m.Category = c
+		m.Group = strings.TrimSpace(req.Group)
 		saveMeta()
 		metaMu.Unlock()
 		applyProjectEnvToApp(c, req.Name)

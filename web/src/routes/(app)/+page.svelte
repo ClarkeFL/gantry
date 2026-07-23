@@ -12,7 +12,7 @@
 		disk: { used: number; total: number };
 		net: number;
 		hist: Point[];
-		apps: { app: string; cpu: string; mem: string }[];
+		apps: { app: string; cpu: string; mem: string; memBytes: number; net: string; containers: number; isApp: boolean }[];
 	};
 
 	let s = $state<Stats | null>(null);
@@ -131,25 +131,47 @@
 			)}
 		</div>
 
-		<h2 class="text-muted-foreground mt-10 mb-2 text-xs font-medium tracking-widest uppercase">Per-app usage</h2>
+		<h2 class="text-muted-foreground mt-10 mb-2 text-xs font-medium tracking-widest uppercase">Container usage</h2>
+		<p class="text-muted-foreground mb-2 text-sm">
+			Every docker container on the server, summed per app and database, biggest memory first.
+		</p>
 		{#if s.apps.length}
 			<div class="rounded-lg border">
 				<Table.Root>
 					<Table.Header>
 						<Table.Row>
-							<Table.Head>App</Table.Head>
+							<Table.Head>Name</Table.Head>
 							<Table.Head>CPU</Table.Head>
 							<Table.Head>Memory</Table.Head>
+							<Table.Head>Network</Table.Head>
+							<Table.Head class="text-right">Containers</Table.Head>
 						</Table.Row>
 					</Table.Header>
 					<Table.Body>
 						{#each s.apps as a, i (a.app + i)}
 							<Table.Row>
-								<Table.Cell><a class="hover:underline" href="/app/{a.app}">{a.app}</a></Table.Cell>
+								<Table.Cell>
+									{#if a.isApp}
+										<a class="hover:underline" href="/app/{a.app}">{a.app}</a>
+									{:else}
+										{a.app}
+									{/if}
+								</Table.Cell>
 								<Table.Cell class="font-mono text-xs tabular-nums">{a.cpu}</Table.Cell>
 								<Table.Cell class="font-mono text-xs tabular-nums">{a.mem}</Table.Cell>
+								<Table.Cell class="font-mono text-xs tabular-nums">{a.net || '–'}</Table.Cell>
+								<Table.Cell class="text-right font-mono text-xs tabular-nums">{a.containers}</Table.Cell>
 							</Table.Row>
 						{/each}
+						<Table.Row>
+							<Table.Cell class="text-muted-foreground text-xs font-medium">Total docker memory</Table.Cell>
+							<Table.Cell></Table.Cell>
+							<Table.Cell class="font-mono text-xs tabular-nums">
+								{gb(s.apps.reduce((sum, a) => sum + (a.memBytes ?? 0), 0))}
+							</Table.Cell>
+							<Table.Cell></Table.Cell>
+							<Table.Cell></Table.Cell>
+						</Table.Row>
 					</Table.Body>
 				</Table.Root>
 			</div>

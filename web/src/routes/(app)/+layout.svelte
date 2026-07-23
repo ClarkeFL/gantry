@@ -134,51 +134,49 @@
 				</a>
 				{#if serverIp}
 					<button
-						class="text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 rounded-md px-3 py-2 font-mono text-xs transition-colors"
+						class="text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors"
 						onclick={copyIp}
 						title="Copy server IP"
 					>
-						<CopyIcon class="size-3.5 shrink-0" />
+						<CopyIcon class="size-4 shrink-0" />
 						{serverIp}
 					</button>
 				{/if}
 				{#if serverTime}
 					<div
-						class="text-muted-foreground flex items-center gap-2 px-3 py-1 text-xs"
+						class="text-muted-foreground flex items-center gap-2 px-3 py-2 text-sm font-medium"
 						title="The server's clock. Cron jobs run on this time."
 					>
-						<ClockIcon class="size-3.5 shrink-0" />
+						<ClockIcon class="size-4 shrink-0" />
 						Server {serverTime}{serverTzLabel() ? ` ${serverTzLabel()}` : ''}
 					</div>
 				{/if}
 				{#if updateAvailable}
-					<Button
-						variant="ghost"
-						size="sm"
-						class="justify-start gap-2 text-amber-500 hover:text-amber-400"
+					<button
+						class="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-amber-500 transition-colors hover:bg-accent/50 hover:text-amber-400 disabled:opacity-60"
 						onclick={update}
 						disabled={updating}
 					>
-						<span class="relative flex size-4 items-center justify-center">
+						<span class="relative flex size-4 shrink-0 items-center justify-center">
 							<DownloadIcon class="size-4" />
 							<span class="absolute -top-0.5 -right-0.5 size-2 animate-pulse rounded-full bg-amber-500"></span>
 						</span>
 						{updating ? 'Updating…' : `Update to ${latest}`}
-					</Button>
+					</button>
 				{:else}
-					<Button
-						variant="ghost"
-						size="sm"
-						class="justify-start gap-2 opacity-50"
-						disabled
+					<div
+						class="text-muted-foreground flex items-center gap-2 px-3 py-2 text-sm font-medium opacity-50"
 						title="You're on the latest version"
 					>
-						<CheckIcon class="size-4" /> Up to date
-					</Button>
+						<CheckIcon class="size-4 shrink-0" /> Up to date
+					</div>
 				{/if}
-				<Button variant="ghost" size="sm" class="justify-start gap-2" onclick={logout}>
-					<LogOutIcon class="size-4" /> Log out
-				</Button>
+				<button
+					class="text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors"
+					onclick={logout}
+				>
+					<LogOutIcon class="size-4 shrink-0" /> Log out
+				</button>
 				<p class="text-muted-foreground px-3 py-1 text-center text-xs">{version}</p>
 			</div>
 		</aside>

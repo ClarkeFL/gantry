@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { api, stream } from '$lib/api';
@@ -24,7 +24,7 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
-	import CheckIcon from '@lucide/svelte/icons/check';
+	import KeyIcon from '@lucide/svelte/icons/key-round';
 
 	type App = { name: string; running: boolean; category: string; group: string; lastDeploy?: string; lastDeployOk: boolean; maintenance: boolean };
 	type Service = { type: string; name: string; status: string; category: string; links: string[] };
@@ -45,6 +45,8 @@
 	let plugins = $state<Record<string, boolean>>({});
 	let env = $state<Record<string, string>>({});
 	let groups = $state<string[]>([]);
+	let ctrStats = $state<Record<string, { cpu: string; mem: string; net: string }>>({});
+	let statsTimer: ReturnType<typeof setInterval>;
 	let envOpen = $state(false);
 	let loading = $state(true);
 
@@ -53,18 +55,15 @@
 	let newGroupName = $state('');
 	let creatingGroup = $state(false);
 
-	// add-apps-to-group dialog
-	let groupAddOpen = $state(false);
-	let groupTarget = $state('');
-
 	// rename dialog
 	let renameOpen = $state(false);
 	let renameTo = $state('');
 	let renaming = $state(false);
 
-	// new app dialog
+	// new app dialog; newAppGroup preselects the group the app is created in
 	let newAppOpen = $state(false);
 	let newAppName = $state('');
+	let newAppGroup = $state('');
 	let creatingApp = $state(false);
 
 	// create database dialog
@@ -114,9 +113,22 @@
 			loading = false;
 		}
 	}
+	async function loadStats() {
+		try {
+			const d = await api('/stats');
+			const m: Record<string, { cpu: string; mem: string; net: string }> = {};
+			for (const a of d.apps ?? []) m[a.app] = { cpu: a.cpu, mem: a.mem, net: a.net };
+			ctrStats = m;
+		} catch {
+			// transient, next poll retries
+		}
+	}
 	onMount(() => {
 		load().catch((e) => toast.error(msg(e)));
+		loadStats();
+		statsTimer = setInterval(loadStats, 10_000);
 	});
+	onDestroy(() => clearInterval(statsTimer));
 
 	async function saveEnv(set: Record<string, string>, unset: string[], restart: boolean) {
 		try {
@@ -139,7 +151,10 @@
 		creatingApp = true;
 		const n = newAppName.trim();
 		try {
-			await api('/apps', { method: 'POST', body: JSON.stringify({ name: n, category: project }) });
+			await api('/apps', {
+				method: 'POST',
+				body: JSON.stringify({ name: n, category: project, group: newAppGroup })
+			});
 			toast.success(`Created ${n}, pick a source to deploy`);
 			newAppOpen = false;
 			goto(`/app/${n}?tab=source`);
@@ -198,15 +213,6 @@
 				body: JSON.stringify({ name })
 			});
 			toast.success(`Deleted "${name}"`);
-			await load();
-		} catch (e) {
-			toast.error(msg(e));
-		}
-	}
-
-	async function setGroup(app: string, group: string) {
-		try {
-			await api(`/apps/${app}/group`, { method: 'POST', body: JSON.stringify({ group }) });
 			await load();
 		} catch (e) {
 			toast.error(msg(e));
@@ -345,7 +351,17 @@
 			<Button variant="outline" size="sm" onclick={load} disabled={loading}>
 				<RefreshCwIcon class="size-4 {loading ? 'animate-spin' : ''}" /> Refresh
 			</Button>
-			<Button size="sm" onclick={() => (newAppOpen = true)}>
+			<Button variant="outline" size="sm" onclick={() => (envOpen = true)}>
+				<KeyIcon class="size-4" /> Shared env
+				<Badge variant="secondary">{Object.keys(env).length}</Badge>
+			</Button>
+			<Button
+				size="sm"
+				onclick={() => {
+					newAppGroup = '';
+					newAppOpen = true;
+				}}
+			>
 				<PlusIcon class="size-4" /> New app
 			</Button>
 		</div>
@@ -354,28 +370,6 @@
 	{#if loading && !apps.length && !services.length}
 		<Skeleton class="h-64" />
 	{:else}
-		<Card.Root class="mb-8">
-			<Card.Header>
-				<Card.Title class="flex items-center gap-2 text-base">
-					Shared environment variables
-					<Badge variant="secondary">{Object.keys(env).length}</Badge>
-					<Button variant="ghost" size="sm" class="ml-auto" onclick={() => (envOpen = !envOpen)}>
-						<ChevronDownIcon class="size-4 transition-transform duration-200 {envOpen ? 'rotate-180' : ''}" />
-						{envOpen ? 'Hide' : 'Edit'}
-					</Button>
-				</Card.Title>
-				<Card.Description>
-					Every app in this project gets these variables, so shared keys live in one place. An app
-					can still override a key on its own Environment tab, and that override is respected.
-				</Card.Description>
-			</Card.Header>
-			{#if envOpen}
-				<Card.Content>
-					<EnvEditor {env} restartLabel="Restart apps" onsave={saveEnv} />
-				</Card.Content>
-			{/if}
-		</Card.Root>
-
 		{#snippet appCard(app: App)}
 			<a href="/app/{app.name}" class="group block h-full">
 			<Card.Root class="group-hover:border-primary/50 h-full transition-colors">
@@ -383,9 +377,23 @@
 					<Card.Title class="flex items-center gap-2 text-base">
 						<BoxIcon class="text-muted-foreground size-4 shrink-0" />
 						<span class="truncate">{app.name}</span>
+						<span
+							class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs font-medium {app.running
+								? 'bg-emerald-500/15 text-emerald-500'
+								: 'bg-red-500/15 text-red-500'}"
+						>
+							{app.running ? 'running' : 'stopped'}
+						</span>
 					</Card.Title>
-					{#if app.maintenance || (app.lastDeploy && !app.lastDeployOk)}
-						<Card.Description class="flex flex-wrap items-center gap-2">
+					{#if (app.running && ctrStats[app.name]) || app.maintenance || (app.lastDeploy && !app.lastDeployOk)}
+						<Card.Description class="flex flex-wrap items-center gap-x-2 gap-y-1">
+							{#if app.running && ctrStats[app.name]}
+								<span class="font-mono text-xs" title="CPU, memory and network across all of this app's containers">
+									{ctrStats[app.name].cpu} cpu · {ctrStats[app.name].mem}{ctrStats[app.name].net
+										? ` · ${ctrStats[app.name].net}`
+										: ''}
+								</span>
+							{/if}
 							{#if app.maintenance}
 								<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-500">
 									maintenance
@@ -399,25 +407,16 @@
 						</Card.Description>
 					{/if}
 				</Card.Header>
-				<Card.Content class="flex items-end gap-1.5">
-					{#if linkedDbs(app.name).length}
-						<div class="flex flex-wrap gap-1.5">
-							{#each linkedDbs(app.name) as s (s.type + s.name)}
-								<Badge variant="outline" class="gap-1 font-mono text-xs">
-									<DatabaseIcon class="size-3" />
-									{s.name}
-								</Badge>
-							{/each}
-						</div>
-					{/if}
-					<span
-						class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs font-medium {app.running
-							? 'bg-emerald-500/15 text-emerald-500'
-							: 'bg-red-500/15 text-red-500'}"
-					>
-						{app.running ? 'running' : 'stopped'}
-					</span>
-				</Card.Content>
+				{#if linkedDbs(app.name).length}
+					<Card.Content class="flex flex-wrap gap-1.5">
+						{#each linkedDbs(app.name) as s (s.type + s.name)}
+							<Badge variant="outline" class="gap-1 font-mono text-xs">
+								<DatabaseIcon class="size-3" />
+								{s.name}
+							</Badge>
+						{/each}
+					</Card.Content>
+				{/if}
 			</Card.Root>
 			</a>
 		{/snippet}
@@ -427,7 +426,10 @@
 			<h2 class="text-lg font-semibold tracking-tight">Apps</h2>
 			<button
 				class="text-muted-foreground hover:text-foreground"
-				onclick={() => (newAppOpen = true)}
+				onclick={() => {
+					newAppGroup = '';
+					newAppOpen = true;
+				}}
 				title="New app in {project}"
 				aria-label="New app in {project}"
 			>
@@ -465,11 +467,11 @@
 				<button
 					class="text-muted-foreground hover:text-foreground hover:border-muted-foreground/50 flex min-h-24 items-center justify-center gap-2 rounded-xl border border-dashed text-sm transition-colors"
 					onclick={() => {
-						groupTarget = g;
-						groupAddOpen = true;
+						newAppGroup = g;
+						newAppOpen = true;
 					}}
 				>
-					<PlusIcon class="size-4" /> Add app
+					<PlusIcon class="size-4" /> New app
 				</button>
 			</div>
 		{/each}
@@ -594,32 +596,16 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root bind:open={groupAddOpen}>
-	<Dialog.Content class="max-w-sm">
+<Dialog.Root bind:open={envOpen}>
+	<Dialog.Content class="sm:max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>Add apps to {groupTarget}</Dialog.Title>
-			<Dialog.Description>Click an app to move it in or out of this group.</Dialog.Description>
+			<Dialog.Title>Shared environment variables</Dialog.Title>
+			<Dialog.Description>
+				Every app in this project gets these variables, so shared keys live in one place. An app
+				can still override a key on its own Environment tab, and that override is respected.
+			</Dialog.Description>
 		</Dialog.Header>
-		<div class="divide-border overflow-hidden rounded-lg border divide-y">
-			{#each myApps as app (app.name)}
-				{@const inGroup = app.group === groupTarget}
-				<button
-					class="bg-muted/30 hover:bg-muted/60 flex w-full items-center gap-2 px-3 py-2 text-left"
-					onclick={() => setGroup(app.name, inGroup ? '' : groupTarget)}
-				>
-					<BoxIcon class="text-muted-foreground size-4 shrink-0" />
-					<span class="truncate text-sm">{app.name}</span>
-					{#if app.group && !inGroup}
-						<span class="text-muted-foreground text-xs">in {app.group}</span>
-					{/if}
-					{#if inGroup}
-						<CheckIcon class="ml-auto size-4 shrink-0 text-emerald-500" />
-					{/if}
-				</button>
-			{:else}
-				<p class="text-muted-foreground px-3 py-2 text-sm">No apps in this project yet.</p>
-			{/each}
-		</div>
+		<EnvEditor {env} restartLabel="Restart apps" onsave={saveEnv} />
 	</Dialog.Content>
 </Dialog.Root>
 
@@ -642,7 +628,7 @@
 <Dialog.Root bind:open={newAppOpen}>
 	<Dialog.Content class="max-w-sm">
 		<Dialog.Header>
-			<Dialog.Title>New app in {project}</Dialog.Title>
+			<Dialog.Title>New app in {newAppGroup ? `${project} / ${newAppGroup}` : project}</Dialog.Title>
 			<Dialog.Description>
 				You'll pick a deploy source on the app's Source tab next. It starts with this project's
 				shared variables.
