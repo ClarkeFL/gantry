@@ -383,35 +383,41 @@
 					<Card.Title class="flex items-center gap-2 text-base">
 						<BoxIcon class="text-muted-foreground size-4 shrink-0" />
 						<span class="truncate">{app.name}</span>
-						<span
-							class="ml-auto size-2 shrink-0 rounded-full {app.running ? 'bg-emerald-500' : 'bg-red-500'}"
-							title={app.running ? 'running' : 'stopped'}
-						></span>
 					</Card.Title>
-					<Card.Description class="flex flex-wrap items-center gap-2">
-						{app.running ? 'Running' : 'Stopped'}
-						{#if app.maintenance}
-							<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-500">
-								maintenance
-							</span>
-						{/if}
-						{#if app.lastDeploy && !app.lastDeployOk}
-							<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-500">
-								last deploy failed
-							</span>
-						{/if}
-					</Card.Description>
+					{#if app.maintenance || (app.lastDeploy && !app.lastDeployOk)}
+						<Card.Description class="flex flex-wrap items-center gap-2">
+							{#if app.maintenance}
+								<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-500">
+									maintenance
+								</span>
+							{/if}
+							{#if app.lastDeploy && !app.lastDeployOk}
+								<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-500">
+									last deploy failed
+								</span>
+							{/if}
+						</Card.Description>
+					{/if}
 				</Card.Header>
-				{#if linkedDbs(app.name).length}
-					<Card.Content class="flex flex-wrap gap-1.5">
-						{#each linkedDbs(app.name) as s (s.type + s.name)}
-							<Badge variant="outline" class="gap-1 font-mono text-xs">
-								<DatabaseIcon class="size-3" />
-								{s.name}
-							</Badge>
-						{/each}
-					</Card.Content>
-				{/if}
+				<Card.Content class="flex items-end gap-1.5">
+					{#if linkedDbs(app.name).length}
+						<div class="flex flex-wrap gap-1.5">
+							{#each linkedDbs(app.name) as s (s.type + s.name)}
+								<Badge variant="outline" class="gap-1 font-mono text-xs">
+									<DatabaseIcon class="size-3" />
+									{s.name}
+								</Badge>
+							{/each}
+						</div>
+					{/if}
+					<span
+						class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs font-medium {app.running
+							? 'bg-emerald-500/15 text-emerald-500'
+							: 'bg-red-500/15 text-red-500'}"
+					>
+						{app.running ? 'running' : 'stopped'}
+					</span>
+				</Card.Content>
 			</Card.Root>
 			</a>
 		{/snippet}
