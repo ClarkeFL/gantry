@@ -377,11 +377,12 @@
 		</Card.Root>
 
 		{#snippet appCard(app: App)}
-			<Card.Root class="hover:border-primary/50 h-full transition-colors">
+			<a href="/app/{app.name}" class="group block h-full">
+			<Card.Root class="group-hover:border-primary/50 h-full transition-colors">
 				<Card.Header>
 					<Card.Title class="flex items-center gap-2 text-base">
 						<BoxIcon class="text-muted-foreground size-4 shrink-0" />
-						<a href="/app/{app.name}" class="truncate hover:underline">{app.name}</a>
+						<span class="truncate">{app.name}</span>
 						<span
 							class="ml-auto size-2 shrink-0 rounded-full {app.running ? 'bg-emerald-500' : 'bg-red-500'}"
 							title={app.running ? 'running' : 'stopped'}
@@ -412,6 +413,7 @@
 					</Card.Content>
 				{/if}
 			</Card.Root>
+			</a>
 		{/snippet}
 
 		<div class="mb-3 flex items-center gap-2 border-b pb-2">

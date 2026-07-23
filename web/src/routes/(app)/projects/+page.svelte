@@ -11,6 +11,7 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import InfoTip from '$lib/components/info-tip.svelte';
 
@@ -174,11 +175,13 @@
 						</Card.Content>
 					</Card.Root>
 				</a>
-			{:else}
-				<p class="text-muted-foreground text-sm sm:col-span-2 lg:col-span-3">
-					No projects yet. Create one, then add apps and databases to it.
-				</p>
 			{/each}
+			<button
+				class="text-muted-foreground hover:text-foreground hover:border-muted-foreground/50 flex min-h-28 items-center justify-center gap-2 rounded-xl border border-dashed text-sm transition-colors"
+				onclick={() => (newProjOpen = true)}
+			>
+				<PlusIcon class="size-4" /> New project
+			</button>
 		</div>
 
 	{/if}
