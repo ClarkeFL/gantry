@@ -99,9 +99,9 @@ var (
 		"landing": {"example.com", "www.example.com"},
 	}
 	mockLinks       = map[string][]string{"postgres/main-db": {"api"}} // "type/name" -> apps
-	mockSchedules   = map[string]string{}                             // "type/name" -> cron
-	mockMaintenance = map[string]bool{}                               // app -> maintenance on
-	mockMounts      = map[string][]string{}                           // app -> "host:container"
+	mockSchedules   = map[string]string{}                              // "type/name" -> cron
+	mockMaintenance = map[string]bool{}                                // app -> maintenance on
+	mockMounts      = map[string][]string{}                            // app -> "host:container"
 	// which dokku service plugins are "installed" in mock (postgres+redis match seed data)
 	mockPlugins = map[string]bool{
 		"postgres": true,

@@ -43,6 +43,7 @@ type appInfo struct {
 	Name         string `json:"name"`
 	Running      bool   `json:"running"`
 	Category     string `json:"category"`
+	Group        string `json:"group"`
 	LastDeploy   string `json:"lastDeploy,omitempty"`
 	LastDeployOK bool   `json:"lastDeployOk"`
 	Maintenance  bool   `json:"maintenance"`
@@ -76,7 +77,7 @@ func handleApps(w http.ResponseWriter, r *http.Request) {
 			running, _ := dokku("ps:report", name, "--running")
 			metaMu.Lock()
 			m := getMeta(name)
-			apps[i] = appInfo{name, running == "true", m.Category, m.LastDeploy, m.LastDeployOK, maint[name]}
+			apps[i] = appInfo{name, running == "true", m.Category, m.Group, m.LastDeploy, m.LastDeployOK, maint[name]}
 			metaMu.Unlock()
 		}(i, name)
 	}
@@ -296,6 +297,28 @@ func handleCategory(w http.ResponseWriter, r *http.Request) {
 	// joining a project inherits its shared env (existing app values win)
 	if project != "" && !strings.EqualFold(project, prev) {
 		applyProjectEnvToApp(project, name)
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleAppGroup sets an app's sub-group within its project.
+func handleAppGroup(w http.ResponseWriter, r *http.Request) {
+	name, ok := appName(w, r)
+	if !ok {
+		return
+	}
+	var req struct{ Group string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	metaMu.Lock()
+	getMeta(name).Group = strings.TrimSpace(req.Group)
+	err := saveMeta()
+	metaMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
 }

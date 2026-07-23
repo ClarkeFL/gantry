@@ -33,9 +33,11 @@ type panelSettings struct {
 	DBCategory   map[string]string `json:"db_category,omitempty"` // "postgres/main-db" -> project
 
 	// Projects unify the old app/db category lists. ProjectEnv is the shared
-	// env each member app inherits (project -> key -> value).
-	Projects   []string                     `json:"projects,omitempty"`
-	ProjectEnv map[string]map[string]string `json:"project_env,omitempty"`
+	// env each member app inherits (project -> key -> value). ProjectGroups
+	// are optional sub-group names to separate apps within a project.
+	Projects      []string                     `json:"projects,omitempty"`
+	ProjectEnv    map[string]map[string]string `json:"project_env,omitempty"`
+	ProjectGroups map[string][]string          `json:"project_groups,omitempty"`
 
 	SessionDays int `json:"session_days,omitempty"` // 0 = default 7
 
@@ -143,20 +145,20 @@ func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 	displayTZ := settings.DisplayTZ
 	settingsMu.Unlock()
 	out := map[string]any{
-		"githubUser":   user,
-		"githubToken":  masked,
-		"leEmail":      leEmail,
-		"registries":   registries,
-		"sessionDays":  sessionDays,
-		"tokens":       tokens,
-		"s3":           s3,
+		"githubUser":    user,
+		"githubToken":   masked,
+		"leEmail":       leEmail,
+		"registries":    registries,
+		"sessionDays":   sessionDays,
+		"tokens":        tokens,
+		"s3":            s3,
 		"alertWebhook":  webhook,
 		"alertsEnabled": alertsOn,
 		"displayTz":     displayTZ,
-		"email":        auth.Email,
-		"totpEnabled":  auth.TOTPSecret != "",
-		"totpPending":  auth.PendingTOTP != "",
-		"recoveryLeft": len(auth.Recovery),
+		"email":         auth.Email,
+		"totpEnabled":   auth.TOTPSecret != "",
+		"totpPending":   auth.PendingTOTP != "",
+		"recoveryLeft":  len(auth.Recovery),
 	}
 	if auth.PendingTOTP != "" {
 		out["pendingSecret"] = auth.PendingTOTP
@@ -452,23 +454,6 @@ func handleServiceCategorySet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
-}
-
-func readNames(r *http.Request) ([]string, bool) {
-	var req struct{ Names []string }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return nil, false
-	}
-	out := []string{}
-	seen := map[string]bool{}
-	for _, n := range req.Names {
-		n = strings.TrimSpace(n)
-		if n != "" && !seen[strings.ToLower(n)] { // 'Uncategorised' allowed: its position is orderable
-			seen[strings.ToLower(n)] = true
-			out = append(out, n)
-		}
-	}
-	return out, true
 }
 
 func handleLEEmail(w http.ResponseWriter, r *http.Request) {

@@ -34,12 +34,12 @@ var (
 	statsApps []appStat
 	statsHist []statPoint
 	statsCur  struct {
-		CPU                            float64
-		MemUsed, MemTotal              uint64
-		DiskUsed, DiskTotal            uint64
-		Net                            float64
-		Load                           string
-		Cores                          int
+		CPU                 float64
+		MemUsed, MemTotal   uint64
+		DiskUsed, DiskTotal uint64
+		Net                 float64
+		Load                string
+		Cores               int
 	}
 )
 

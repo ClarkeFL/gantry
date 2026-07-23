@@ -30,8 +30,6 @@
 	let newProjName = $state('');
 	let creating = $state(false);
 
-	let dragIdx = $state(-1);
-
 	const unassignedApps = $derived(apps.filter((a) => !a.category));
 	const unassignedServices = $derived(services.filter((s) => !s.category));
 
@@ -54,27 +52,18 @@
 			services = s.services ?? [];
 			// both endpoints return the shared project list plus any strays
 			const seen = new Set<string>();
-			projects = [...(a.categories ?? []), ...(s.categories ?? [])].filter((c) => {
-				if (!c || seen.has(c)) return false;
-				seen.add(c);
-				return true;
-			});
+			projects = [...(a.categories ?? []), ...(s.categories ?? [])]
+				.filter((c) => {
+					if (!c || seen.has(c)) return false;
+					seen.add(c);
+					return true;
+				})
+				.sort((x, y) => x.localeCompare(y));
 		} finally {
 			loading = false;
 		}
 	}
 	onMount(load);
-
-	async function moveProject(from: number, to: number) {
-		if (from === to || from < 0 || to < 0 || to >= projects.length) return;
-		const next = [...projects];
-		const [p] = next.splice(from, 1);
-		next.splice(to, 0, p);
-		projects = next;
-		await api('/projects/order', { method: 'PUT', body: JSON.stringify({ names: next }) }).catch((e) =>
-			toast.error(msg(e))
-		);
-	}
 
 	async function createProject(e: SubmitEvent) {
 		e.preventDefault();
@@ -154,97 +143,59 @@
 		</div>
 	{:else}
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-			{#each projects as p, i (p)}
+			{#each projects as p (p)}
 				{@const pApps = projApps(p)}
 				{@const pSvcs = projServices(p)}
 				{@const runningCount = pApps.filter((a) => a.running).length}
-				<div
-					role="listitem"
-					draggable={true}
-					ondragstart={(e) => {
-						dragIdx = i;
-						e.dataTransfer?.setData('text/plain', p);
-					}}
-					ondragover={(e) => e.preventDefault()}
-					ondrop={(e) => {
-						e.preventDefault();
-						moveProject(dragIdx, i);
-						dragIdx = -1;
-					}}
-				>
-					<a href="/project/{encodeURIComponent(p)}" class="group block h-full">
-						<Card.Root class="group-hover:border-primary/50 h-full transition-colors">
-							<Card.Header>
-								<Card.Title class="flex items-center gap-2 text-base">
-									<FolderIcon class="text-muted-foreground size-4" />
-									{p}
-									<span class="ml-auto flex flex-col">
-										<button
-											class="text-muted-foreground hover:text-foreground disabled:opacity-30"
-											onclick={(e) => {
-												e.preventDefault();
-												moveProject(i, i - 1);
-											}}
-											disabled={i === 0}
-											aria-label="Move {p} up"
-										>
-											<ChevronUpIcon class="size-3.5" />
-										</button>
-										<button
-											class="text-muted-foreground hover:text-foreground disabled:opacity-30"
-											onclick={(e) => {
-												e.preventDefault();
-												moveProject(i, i + 1);
-											}}
-											disabled={i === projects.length - 1}
-											aria-label="Move {p} down"
-										>
-											<ChevronDownIcon class="size-3.5" />
-										</button>
-									</span>
-									<button
-										class="text-muted-foreground hover:text-destructive"
-										onclick={(e) => {
-											e.preventDefault();
-											deleteProject(p);
-										}}
-										title="Delete project"
-										aria-label="Delete project {p}"
-									>
-										<Trash2Icon class="size-4" />
-									</button>
-								</Card.Title>
-								<Card.Description class="flex items-center gap-3">
-									<span class="flex items-center gap-1">
-										<BoxIcon class="size-3.5" />
-										{pApps.length}
-										{pApps.length === 1 ? 'app' : 'apps'}
-									</span>
-									<span class="flex items-center gap-1">
-										<DatabaseIcon class="size-3.5" />
-										{pSvcs.length}
-										{pSvcs.length === 1 ? 'database' : 'databases'}
-									</span>
-									{#if pApps.length}
-										<span
-											class="ml-auto flex items-center gap-1.5"
-											title="{runningCount} of {pApps.length} apps running"
-										>
-											<span
-												class="size-2 rounded-full {runningCount === pApps.length
-													? 'bg-emerald-500'
-													: runningCount
-														? 'bg-amber-500'
-														: 'bg-red-500'}"
-											></span>
-											{runningCount}/{pApps.length}
-										</span>
-									{/if}
-								</Card.Description>
-							</Card.Header>
-						</Card.Root>
-					</a>
-				</div>
+				{@const members = [...pApps.map((a) => a.name), ...pSvcs.map((s) => s.name)]}
+				<a href="/project/{encodeURIComponent(p)}" class="group block h-full">
+					<Card.Root class="group-hover:border-primary/50 h-full transition-colors">
+						<Card.Header>
+							<Card.Title class="flex items-center gap-2 text-base">
+								<FolderIcon class="text-muted-foreground size-4 shrink-0" />
+								<span class="truncate">{p}</span>
+								{#if pApps.length}
+									<span
+										class="ml-auto size-2 shrink-0 rounded-full {runningCount === pApps.length
+											? 'bg-emerald-500'
+											: runningCount
+												? 'bg-amber-500'
+												: 'bg-red-500'}"
+										title="{runningCount} of {pApps.length} apps running"
+									></span>
+								{/if}
+								<button
+									class="text-muted-foreground hover:text-destructive shrink-0 opacity-0 transition-opacity group-hover:opacity-100 {pApps.length
+										? ''
+										: 'ml-auto'}"
+									onclick={(e) => {
+										e.preventDefault();
+										deleteProject(p);
+									}}
+									title="Delete project"
+									aria-label="Delete project {p}"
+								>
+									<Trash2Icon class="size-4" />
+								</button>
+							</Card.Title>
+							<Card.Description>
+								{pApps.length}
+								{pApps.length === 1 ? 'app' : 'apps'} · {pSvcs.length}
+								{pSvcs.length === 1 ? 'database' : 'databases'}
+							</Card.Description>
+						</Card.Header>
+						{#if members.length}
+							<Card.Content class="flex flex-wrap gap-1.5">
+								{#each members.slice(0, 5) as m (m)}
+									<span class="bg-muted/60 text-muted-foreground rounded px-1.5 py-0.5 font-mono text-xs">{m}</span>
+								{/each}
+								{#if members.length > 5}
+									<span class="text-muted-foreground px-1 py-0.5 text-xs">+{members.length - 5} more</span>
+								{/if}
+							</Card.Content>
+						{/if}
+					</Card.Root>
+				</a>
 			{:else}
 				<p class="text-muted-foreground text-sm sm:col-span-2 lg:col-span-3">
 					No projects yet. Create one, then add apps and databases to it.

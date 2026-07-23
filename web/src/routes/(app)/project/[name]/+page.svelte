@@ -22,8 +22,10 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import PencilIcon from '@lucide/svelte/icons/pencil';
+	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
 
-	type App = { name: string; running: boolean; category: string; lastDeploy?: string; lastDeployOk: boolean; maintenance: boolean };
+	type App = { name: string; running: boolean; category: string; group: string; lastDeploy?: string; lastDeployOk: boolean; maintenance: boolean };
 	type Service = { type: string; name: string; status: string; category: string; links: string[] };
 
 	const DB_TYPES = [
@@ -41,8 +43,19 @@
 	let projects = $state<string[]>([]);
 	let plugins = $state<Record<string, boolean>>({});
 	let env = $state<Record<string, string>>({});
+	let groups = $state<string[]>([]);
 	let envOpen = $state(false);
 	let loading = $state(true);
+
+	// new group dialog
+	let newGroupOpen = $state(false);
+	let newGroupName = $state('');
+	let creatingGroup = $state(false);
+
+	// rename dialog
+	let renameOpen = $state(false);
+	let renameTo = $state('');
+	let renaming = $state(false);
 
 	// new app dialog
 	let newAppOpen = $state(false);
@@ -64,8 +77,9 @@
 
 	const myApps = $derived(apps.filter((a) => a.category === project));
 	const myServices = $derived(services.filter((s) => s.category === project));
-	const otherApps = $derived(apps.filter((a) => a.category !== project));
-	const otherServices = $derived(services.filter((s) => s.category !== project));
+	// apps whose group no longer exists fall back to the base section
+	const baseApps = $derived(myApps.filter((a) => !a.group || !groups.includes(a.group)));
+	const appsInGroup = (g: string) => myApps.filter((a) => a.group === g);
 	const installedTypes = $derived(DB_TYPES.filter((t) => plugins[t.type]));
 	const missingTypes = $derived(DB_TYPES.filter((t) => !plugins[t.type]));
 
@@ -80,16 +94,17 @@
 	async function load() {
 		loading = true;
 		try {
-			const [a, s, e] = await Promise.all([
+			const [a, s, p] = await Promise.all([
 				api('/apps'),
 				api('/services'),
-				api(`/projects/${encodeURIComponent(project)}/env`)
+				api(`/projects/${encodeURIComponent(project)}`)
 			]);
 			apps = a.apps ?? [];
 			services = s.services ?? [];
 			projects = a.categories ?? [];
 			plugins = s.plugins ?? {};
-			env = e.env ?? {};
+			env = p.env ?? {};
+			groups = p.groups ?? [];
 		} finally {
 			loading = false;
 		}
@@ -130,10 +145,63 @@
 		}
 	}
 
-	async function addApp(app: string) {
+	async function renameProject(e: SubmitEvent) {
+		e.preventDefault();
+		const to = renameTo.trim();
+		if (!to || to === project) {
+			renameOpen = false;
+			return;
+		}
+		renaming = true;
 		try {
-			await api(`/apps/${app}/category`, { method: 'POST', body: JSON.stringify({ category: project }) });
-			toast.success(`Added ${app} to ${project}, it inherits the shared variables`);
+			await api('/projects/rename', { method: 'PUT', body: JSON.stringify({ from: project, to }) });
+			toast.success(`Renamed to ${to}`);
+			renameOpen = false;
+			goto(`/project/${encodeURIComponent(to)}`, { replaceState: true });
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			renaming = false;
+		}
+	}
+
+	async function createGroup(e: SubmitEvent) {
+		e.preventDefault();
+		creatingGroup = true;
+		try {
+			await api(`/projects/${encodeURIComponent(project)}/groups`, {
+				method: 'POST',
+				body: JSON.stringify({ name: newGroupName.trim() })
+			});
+			toast.success(`Group "${newGroupName.trim()}" created`);
+			newGroupOpen = false;
+			newGroupName = '';
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			creatingGroup = false;
+		}
+	}
+
+	async function deleteGroup(name: string) {
+		if (!(await askConfirm(`Delete group "${name}"? Its apps stay in the project, just ungrouped.`))) return;
+		try {
+			await api(`/projects/${encodeURIComponent(project)}/groups`, {
+				method: 'DELETE',
+				body: JSON.stringify({ name })
+			});
+			toast.success(`Deleted "${name}"`);
+			await load();
+		} catch (e) {
+			toast.error(msg(e));
+		}
+	}
+
+	async function setGroup(app: string, group: string) {
+		try {
+			await api(`/apps/${app}/group`, { method: 'POST', body: JSON.stringify({ group }) });
 			await load();
 		} catch (e) {
 			toast.error(msg(e));
@@ -257,6 +325,17 @@
 
 	<div class="mb-6 flex flex-wrap items-center gap-2">
 		<h1 class="text-2xl font-semibold tracking-tight">{project}</h1>
+		<button
+			class="text-muted-foreground hover:text-foreground p-1"
+			onclick={() => {
+				renameTo = project;
+				renameOpen = true;
+			}}
+			title="Rename project"
+			aria-label="Rename project"
+		>
+			<PencilIcon class="size-4" />
+		</button>
 		<div class="ml-auto flex flex-wrap gap-2">
 			<Button variant="outline" size="sm" onclick={load} disabled={loading}>
 				<RefreshCwIcon class="size-4 {loading ? 'animate-spin' : ''}" /> Refresh
@@ -292,6 +371,55 @@
 			{/if}
 		</Card.Root>
 
+		{#snippet appCard(app: App)}
+			<Card.Root class="hover:border-primary/50 h-full transition-colors">
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2 text-base">
+						<BoxIcon class="text-muted-foreground size-4 shrink-0" />
+						<a href="/app/{app.name}" class="truncate hover:underline">{app.name}</a>
+						<span
+							class="ml-auto size-2 shrink-0 rounded-full {app.running ? 'bg-emerald-500' : 'bg-red-500'}"
+							title={app.running ? 'running' : 'stopped'}
+						></span>
+					</Card.Title>
+					<Card.Description class="flex flex-wrap items-center gap-2">
+						{app.running ? 'Running' : 'Stopped'}
+						{#if app.maintenance}
+							<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-500">
+								maintenance
+							</span>
+						{/if}
+						{#if app.lastDeploy && !app.lastDeployOk}
+							<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-500">
+								last deploy failed
+							</span>
+						{/if}
+						{#if groups.length}
+							<select
+								class="border-input text-muted-foreground ml-auto h-7 rounded-md border bg-transparent px-2 text-xs"
+								value={app.group && groups.includes(app.group) ? app.group : ''}
+								onchange={(e) => setGroup(app.name, (e.target as HTMLSelectElement).value)}
+								title="Group within this project"
+							>
+								<option value="">No group</option>
+								{#each groups as g (g)}<option value={g}>{g}</option>{/each}
+							</select>
+						{/if}
+					</Card.Description>
+				</Card.Header>
+				{#if linkedDbs(app.name).length}
+					<Card.Content class="flex flex-wrap gap-1.5">
+						{#each linkedDbs(app.name) as s (s.type + s.name)}
+							<Badge variant="outline" class="gap-1 font-mono text-xs">
+								<DatabaseIcon class="size-3" />
+								{s.name}
+							</Badge>
+						{/each}
+					</Card.Content>
+				{/if}
+			</Card.Root>
+		{/snippet}
+
 		<div class="mb-3 flex items-center gap-2 border-b pb-2">
 			<BoxIcon class="text-muted-foreground size-4" />
 			<h2 class="text-lg font-semibold tracking-tight">Apps</h2>
@@ -303,66 +431,43 @@
 			>
 				<PlusIcon class="size-4" />
 			</button>
-			{#if otherApps.length}
-				<select
-					class="border-input text-muted-foreground ml-auto h-7 rounded-md border bg-transparent px-2 text-xs"
-					value=""
-					onchange={(e) => {
-						const app = (e.target as HTMLSelectElement).value;
-						if (app) addApp(app);
-						(e.target as HTMLSelectElement).value = '';
-					}}
-				>
-					<option value="">Add existing app…</option>
-					{#each otherApps as a (a.name)}<option value={a.name}>{a.name}</option>{/each}
-				</select>
-			{/if}
+			<Button variant="ghost" size="sm" class="text-muted-foreground ml-auto" onclick={() => (newGroupOpen = true)}>
+				<FolderPlusIcon class="size-4" /> New group
+			</Button>
 		</div>
-		{#if myApps.length}
-			<div class="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-				{#each myApps as app (app.name)}
-					<a href="/app/{app.name}" class="group">
-						<Card.Root class="group-hover:border-primary/50 h-full transition-colors">
-							<Card.Header>
-								<Card.Title class="flex items-center gap-2 text-base">
-									<BoxIcon class="text-muted-foreground size-4" />
-									{app.name}
-									<span
-										class="ml-auto size-2 rounded-full {app.running ? 'bg-emerald-500' : 'bg-red-500'}"
-										title={app.running ? 'running' : 'stopped'}
-									></span>
-								</Card.Title>
-								<Card.Description class="flex flex-wrap items-center gap-2">
-									{app.running ? 'Running' : 'Stopped'}
-									{#if app.maintenance}
-										<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-500">
-											maintenance
-										</span>
-									{/if}
-									{#if app.lastDeploy && !app.lastDeployOk}
-										<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-500">
-											last deploy failed
-										</span>
-									{/if}
-								</Card.Description>
-							</Card.Header>
-							{#if linkedDbs(app.name).length}
-								<Card.Content class="flex flex-wrap gap-1.5">
-									{#each linkedDbs(app.name) as s (s.type + s.name)}
-										<Badge variant="outline" class="gap-1 font-mono text-xs">
-											<DatabaseIcon class="size-3" />
-											{s.name}
-										</Badge>
-									{/each}
-								</Card.Content>
-							{/if}
-						</Card.Root>
-					</a>
+		{#if baseApps.length}
+			<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+				{#each baseApps as app (app.name)}
+					{@render appCard(app)}
 				{/each}
 			</div>
-		{:else}
-			<p class="text-muted-foreground mb-8 text-sm">No apps in this project yet.</p>
+		{:else if !groups.length}
+			<p class="text-muted-foreground mb-6 text-sm">No apps in this project yet.</p>
 		{/if}
+		{#each groups as g (g)}
+			<div class="mb-3 flex items-center gap-2">
+				<h3 class="text-muted-foreground text-sm font-medium">{g}</h3>
+				<button
+					class="text-muted-foreground hover:text-destructive"
+					onclick={() => deleteGroup(g)}
+					title="Delete group"
+					aria-label="Delete group {g}"
+				>
+					<Trash2Icon class="size-3.5" />
+				</button>
+			</div>
+			{#if appsInGroup(g).length}
+				<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+					{#each appsInGroup(g) as app (app.name)}
+						{@render appCard(app)}
+					{/each}
+				</div>
+			{:else}
+				<p class="text-muted-foreground mb-6 text-sm">
+					Empty group. Use the group dropdown on an app card to move apps here.
+				</p>
+			{/if}
+		{/each}
 
 		<div class="mb-3 flex items-center gap-2 border-b pb-2">
 			<DatabaseIcon class="text-muted-foreground size-4" />
@@ -372,23 +477,6 @@
 					text="Each type needs its dokku plugin on the server, a one-time install. Creating a database runs a container; linking it to an app writes the connection URL into that app's env."
 				/>
 			</h2>
-			{#if otherServices.length}
-				<select
-					class="border-input text-muted-foreground ml-auto h-7 rounded-md border bg-transparent px-2 text-xs"
-					value=""
-					onchange={(e) => {
-						const v = (e.target as HTMLSelectElement).value;
-						const s = otherServices.find((x) => x.type + '/' + x.name === v);
-						if (s) setServiceProject(s, project);
-						(e.target as HTMLSelectElement).value = '';
-					}}
-				>
-					<option value="">Add existing database…</option>
-					{#each otherServices as s (s.type + s.name)}
-						<option value={s.type + '/' + s.name}>{s.name} ({s.type})</option>
-					{/each}
-				</select>
-			{/if}
 		</div>
 
 		<div class="mb-4 flex flex-wrap gap-2">
@@ -485,6 +573,37 @@
 		{/if}
 	{/if}
 </div>
+
+<Dialog.Root bind:open={renameOpen}>
+	<Dialog.Content class="max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>Rename project</Dialog.Title>
+			<Dialog.Description>
+				Renames the project everywhere, its apps, databases and shared variables move with it.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form onsubmit={renameProject} class="grid gap-4">
+			<Input bind:value={renameTo} required placeholder={project} />
+			<Button type="submit" disabled={renaming}>{renaming ? 'Renaming…' : 'Rename'}</Button>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={newGroupOpen}>
+	<Dialog.Content class="max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>New group in {project}</Dialog.Title>
+			<Dialog.Description>
+				A label to separate apps inside this project, like "Frontend" or "Micro services". It
+				doesn't change anything about how apps run.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form onsubmit={createGroup} class="grid gap-4">
+			<Input bind:value={newGroupName} required placeholder="e.g. Micro services" />
+			<Button type="submit" disabled={creatingGroup}>{creatingGroup ? 'Creating…' : 'Create group'}</Button>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
 
 <Dialog.Root bind:open={newAppOpen}>
 	<Dialog.Content class="max-w-sm">

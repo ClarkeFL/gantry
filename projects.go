@@ -170,6 +170,7 @@ func handleProjectDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	delete(settings.ProjectEnv, req.Name)
+	delete(settings.ProjectGroups, req.Name)
 	err := saveSettings()
 	settingsMu.Unlock()
 	if err != nil {
@@ -197,16 +198,72 @@ func handleProjectDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-func handleProjectOrder(w http.ResponseWriter, r *http.Request) {
-	names, ok := readNames(r)
-	if !ok {
+// handleProjectRename renames a project everywhere the name is referenced:
+// the ordered list, the shared env store, service membership, and app metas.
+func handleProjectRename(w http.ResponseWriter, r *http.Request) {
+	var req struct{ From, To string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpErr(w, 400, "bad request")
 		return
 	}
+	req.From, req.To = strings.TrimSpace(req.From), strings.TrimSpace(req.To)
+	if req.From == "" || req.To == "" {
+		httpErr(w, 400, "project name required")
+		return
+	}
 	settingsMu.Lock()
-	settings.Projects = names
+	if !strings.EqualFold(req.From, req.To) {
+		for _, c := range settings.Projects {
+			if strings.EqualFold(c, req.To) {
+				settingsMu.Unlock()
+				httpErr(w, 409, "a project with that name already exists")
+				return
+			}
+		}
+	}
+	found := false
+	for i, c := range settings.Projects {
+		if strings.EqualFold(c, req.From) {
+			settings.Projects[i] = req.To
+			found = true
+		}
+	}
+	if !found {
+		settingsMu.Unlock()
+		httpErr(w, 404, "no such project")
+		return
+	}
+	if env, ok := settings.ProjectEnv[req.From]; ok {
+		delete(settings.ProjectEnv, req.From)
+		settings.ProjectEnv[req.To] = env
+	}
+	if groups, ok := settings.ProjectGroups[req.From]; ok {
+		delete(settings.ProjectGroups, req.From)
+		settings.ProjectGroups[req.To] = groups
+	}
+	for k, v := range settings.DBCategory {
+		if strings.EqualFold(v, req.From) {
+			settings.DBCategory[k] = req.To
+		}
+	}
 	err := saveSettings()
 	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	metaMu.Lock()
+	changed := false
+	for _, m := range meta {
+		if strings.EqualFold(m.Category, req.From) {
+			m.Category = req.To
+			changed = true
+		}
+	}
+	if changed {
+		err = saveMeta()
+	}
+	metaMu.Unlock()
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
@@ -214,7 +271,7 @@ func handleProjectOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-func handleProjectEnvGet(w http.ResponseWriter, r *http.Request) {
+func handleProjectGet(w http.ResponseWriter, r *http.Request) {
 	name, ok := projectName(w, r)
 	if !ok {
 		return
@@ -224,8 +281,92 @@ func handleProjectEnvGet(w http.ResponseWriter, r *http.Request) {
 	for k, v := range settings.ProjectEnv[name] {
 		env[k] = v
 	}
+	groups := append([]string{}, settings.ProjectGroups[name]...)
 	settingsMu.Unlock()
-	writeJSON(w, map[string]any{"env": env})
+	writeJSON(w, map[string]any{"env": env, "groups": groups})
+}
+
+func handleProjectGroupCreate(w http.ResponseWriter, r *http.Request) {
+	project, ok := projectName(w, r)
+	if !ok {
+		return
+	}
+	var req struct{ Name string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		httpErr(w, 400, "group name required")
+		return
+	}
+	settingsMu.Lock()
+	found := false
+	for _, g := range settings.ProjectGroups[project] {
+		if strings.EqualFold(g, req.Name) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		if settings.ProjectGroups == nil {
+			settings.ProjectGroups = map[string][]string{}
+		}
+		settings.ProjectGroups[project] = append(settings.ProjectGroups[project], req.Name)
+	}
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleProjectGroupDelete(w http.ResponseWriter, r *http.Request) {
+	project, ok := projectName(w, r)
+	if !ok {
+		return
+	}
+	var req struct{ Name string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, 400, "bad request")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	settingsMu.Lock()
+	kept := settings.ProjectGroups[project][:0]
+	for _, g := range settings.ProjectGroups[project] {
+		if !strings.EqualFold(g, req.Name) {
+			kept = append(kept, g)
+		}
+	}
+	settings.ProjectGroups[project] = kept
+	err := saveSettings()
+	settingsMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	// apps in the deleted group fall back to the base Apps section
+	metaMu.Lock()
+	changed := false
+	for _, m := range meta {
+		if strings.EqualFold(m.Category, project) && strings.EqualFold(m.Group, req.Name) {
+			m.Group = ""
+			changed = true
+		}
+	}
+	if changed {
+		err = saveMeta()
+	}
+	metaMu.Unlock()
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // handleProjectEnvSet updates the shared env and fans the change out to
