@@ -1218,10 +1218,6 @@
 
 			<Tabs.Content value="logs" class="mt-4 grid gap-3">
 				<div class="flex flex-wrap items-center gap-2">
-					<span class="flex items-center gap-1.5 text-xs font-medium text-emerald-500">
-						<span class="size-1.5 animate-pulse rounded-full bg-emerald-500"></span>
-						live
-					</span>
 					<select
 						class="border-input text-muted-foreground h-7 rounded-md border bg-transparent px-2 text-xs"
 						bind:value={histHours}
