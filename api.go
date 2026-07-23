@@ -85,7 +85,7 @@ func handleApps(w http.ResponseWriter, r *http.Request) {
 	catSet := map[string]bool{}
 	cats := []string{}
 	settingsMu.Lock()
-	for _, c := range settings.Categories {
+	for _, c := range settings.Projects {
 		if !catSet[c] {
 			catSet[c] = true
 			cats = append(cats, c)
@@ -160,11 +160,20 @@ func handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	for i := range jobs {
 		jobs[i].Last = lastRun(name, jobs[i].ID)
 	}
+	settingsMu.Lock()
+	projectEnv := map[string]string{}
+	for k, v := range settings.ProjectEnv[category] {
+		projectEnv[k] = v
+	}
+	projects := append([]string{}, settings.Projects...)
+	settingsMu.Unlock()
 	writeJSON(w, map[string]any{
 		"name":           name,
 		"running":        running == "true",
 		"category":       category,
 		"env":            envVars,
+		"projectEnv":     projectEnv,
+		"projects":       projects,
 		"domains":        domains,
 		"ssl":            sslOn,
 		"leEmailSet":     func() bool { settingsMu.Lock(); defer settingsMu.Unlock(); return settings.LEEmail != "" }(),
@@ -251,27 +260,9 @@ func handleEnv(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if len(req.Set) > 0 {
-		args := []string{"config:set", "--no-restart", name}
-		keys := make([]string, 0, len(req.Set))
-		for k := range req.Set {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			args = append(args, k+"="+req.Set[k])
-		}
-		if _, err := dokku(args...); err != nil {
-			httpErr(w, 500, err.Error())
-			return
-		}
-	}
-	if len(req.Unset) > 0 {
-		args := append([]string{"config:unset", "--no-restart", name}, req.Unset...)
-		if _, err := dokku(args...); err != nil {
-			httpErr(w, 500, err.Error())
-			return
-		}
+	if err := applyEnv(name, req.Set, req.Unset); err != nil {
+		httpErr(w, 500, err.Error())
+		return
 	}
 	if req.Restart {
 		if _, err := dokku("ps:restart", name); err != nil {
@@ -292,13 +283,19 @@ func handleCategory(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "bad request")
 		return
 	}
+	project := strings.TrimSpace(req.Category)
 	metaMu.Lock()
-	getMeta(name).Category = strings.TrimSpace(req.Category)
+	prev := getMeta(name).Category
+	getMeta(name).Category = project
 	err := saveMeta()
 	metaMu.Unlock()
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
+	}
+	// joining a project inherits its shared env (existing app values win)
+	if project != "" && !strings.EqualFold(project, prev) {
+		applyProjectEnvToApp(project, name)
 	}
 	writeJSON(w, map[string]any{"ok": true})
 }
@@ -376,7 +373,7 @@ func handleServicesGet(w http.ResponseWriter, r *http.Request) {
 	settingsMu.Lock()
 	catSet := map[string]bool{}
 	cats := []string{}
-	for _, c := range settings.DBCategories {
+	for _, c := range settings.Projects {
 		if !catSet[c] {
 			catSet[c] = true
 			cats = append(cats, c)
@@ -1040,6 +1037,7 @@ func handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		getMeta(req.Name).Category = c
 		saveMeta()
 		metaMu.Unlock()
+		applyProjectEnvToApp(c, req.Name)
 	}
 	writeJSON(w, map[string]any{"ok": true})
 }

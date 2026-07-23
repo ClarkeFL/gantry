@@ -9,7 +9,6 @@
 	import { toast } from 'svelte-sonner';
 	import GaugeIcon from '@lucide/svelte/icons/gauge';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
-	import DatabaseIcon from '@lucide/svelte/icons/database';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import ArchiveIcon from '@lucide/svelte/icons/archive';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
@@ -30,8 +29,7 @@
 
 	const nav = [
 		{ href: '/', label: 'Overview', icon: GaugeIcon },
-		{ href: '/apps', label: 'Apps', icon: LayoutGridIcon },
-		{ href: '/databases', label: 'Databases', icon: DatabaseIcon },
+		{ href: '/projects', label: 'Projects', icon: LayoutGridIcon },
 		{ href: '/domains', label: 'Domains', icon: GlobeIcon },
 		{ href: '/backups', label: 'Backups', icon: ArchiveIcon }
 	];
@@ -114,7 +112,8 @@
 					<a
 						href={item.href}
 						class="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors
-						{page.url.pathname === item.href
+						{page.url.pathname === item.href ||
+						(item.href === '/projects' && (page.url.pathname.startsWith('/project/') || page.url.pathname.startsWith('/app/')))
 							? 'bg-accent text-accent-foreground'
 							: 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'}"
 					>

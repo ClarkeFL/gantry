@@ -8,6 +8,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import CronInput from '$lib/components/cron-input.svelte';
+	import EnvEditor from '$lib/components/env-editor.svelte';
 	import { ago, fmtDate } from '$lib/dates';
 	import { userTzFull, serverTzLabel } from '$lib/server-info.svelte';
 	import { Label } from '$lib/components/ui/label';
@@ -26,7 +27,6 @@
 	import LockIcon from '@lucide/svelte/icons/lock';
 	import WrenchIcon from '@lucide/svelte/icons/wrench';
 	import CloudIcon from '@lucide/svelte/icons/cloud';
-	import UploadIcon from '@lucide/svelte/icons/upload';
 	import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
 	import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
@@ -43,6 +43,8 @@
 		running: boolean;
 		category: string;
 		env: Record<string, string>;
+		projectEnv: Record<string, string>;
+		projects: string[];
 		domains: Domain[];
 		ssl: boolean;
 		leEmailSet: boolean;
@@ -69,11 +71,8 @@
 	// read-only and excluded from the editable rows AND the unset diff, so a
 	// save can never delete them and break the app.
 	const isSysEnv = (k: string) => k.startsWith('DOKKU_') || k === 'GIT_REV';
-	let rows = $state<{ key: string; value: string }[]>([]);
+	let editEnv = $state<Record<string, string>>({});
 	let sysEnv = $state<[string, string][]>([]);
-	let origEnv: Record<string, string> = {};
-	let restartAfterSave = $state(true);
-	let savingEnv = $state(false);
 
 	// cron editor
 	let jobs = $state<Job[]>([]);
@@ -161,8 +160,7 @@
 		d = await api<Detail>('/apps/' + name);
 		const entries = Object.entries(d.env);
 		sysEnv = entries.filter(([k]) => isSysEnv(k)).sort((a, b) => a[0].localeCompare(b[0]));
-		rows = entries.filter(([k]) => !isSysEnv(k)).map(([key, value]) => ({ key, value }));
-		origEnv = Object.fromEntries(entries.filter(([k]) => !isSysEnv(k)));
+		editEnv = Object.fromEntries(entries.filter(([k]) => !isSysEnv(k)));
 		jobs = d.jobs.map((j) => ({ ...j }));
 		category = d.category;
 		srcRepo = d.repo ?? '';
@@ -366,62 +364,16 @@
 		);
 	}
 
-	function importEnvFile(e: Event) {
-		const file = (e.target as HTMLInputElement).files?.[0];
-		if (!file) return;
-		file.text().then((text) => {
-			let count = 0;
-			for (let line of text.split('\n')) {
-				line = line.trim();
-				if (!line || line.startsWith('#')) continue;
-				line = line.replace(/^export\s+/, '');
-				const eq = line.indexOf('=');
-				if (eq < 1) continue;
-				const key = line.slice(0, eq).trim();
-				let value = line.slice(eq + 1).trim();
-				if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-					value = value.slice(1, -1);
-				}
-				const existing = rows.find((r) => r.key === key);
-				if (existing) existing.value = value;
-				else rows.push({ key, value });
-				count++;
-			}
-			toast.success(`Imported ${count} variables, review below, then Save changes`);
-		});
-		(e.target as HTMLInputElement).value = '';
-	}
-
-	async function saveEnv() {
-		const set: Record<string, string> = {};
-		const seen = new Set<string>();
-		for (const r of rows) {
-			const k = r.key.trim();
-			if (!k) continue;
-			if (seen.has(k)) {
-				toast.error('Duplicate key: ' + k);
-				return;
-			}
-			seen.add(k);
-			if (origEnv[k] !== r.value) set[k] = r.value;
-		}
-		const unset = Object.keys(origEnv).filter((k) => !seen.has(k));
-		if (!Object.keys(set).length && !unset.length) {
-			toast.info('Nothing changed');
-			return;
-		}
-		savingEnv = true;
+	async function saveEnv(set: Record<string, string>, unset: string[], restart: boolean) {
 		try {
 			await api(`/apps/${name}/env`, {
 				method: 'POST',
-				body: JSON.stringify({ set, unset, restart: restartAfterSave })
+				body: JSON.stringify({ set, unset, restart })
 			});
-			toast.success('Environment saved' + (restartAfterSave ? ', app restarting' : ''));
+			toast.success('Environment saved' + (restart ? ', app restarting' : ''));
 			await load();
 		} catch (e) {
 			toast.error(msg(e));
-		} finally {
-			savingEnv = false;
 		}
 	}
 
@@ -447,7 +399,8 @@
 		savingCategory = true;
 		try {
 			await api(`/apps/${name}/category`, { method: 'POST', body: JSON.stringify({ category }) });
-			toast.success('Category saved');
+			toast.success(category ? `Moved to ${category}, shared variables applied` : 'Removed from project');
+			await load();
 		} catch (e) {
 			toast.error(msg(e));
 		} finally {
@@ -502,7 +455,7 @@
 		try {
 			await api(`/apps/${name}`, { method: 'DELETE' });
 			toast.success(`Destroyed ${name}`);
-			goto('/apps');
+			goto('/projects');
 		} catch (e) {
 			toast.error(msg(e));
 			destroying = false;
@@ -517,8 +470,12 @@
 </script>
 
 <div class="mx-auto max-w-4xl">
-	<a href="/apps" class="text-muted-foreground hover:text-foreground mb-4 inline-flex items-center gap-1 text-sm">
-		<ArrowLeftIcon class="size-4" /> Apps
+	<a
+		href={d?.category ? `/project/${encodeURIComponent(d.category)}` : '/projects'}
+		class="text-muted-foreground hover:text-foreground mb-4 inline-flex items-center gap-1 text-sm"
+	>
+		<ArrowLeftIcon class="size-4" />
+		{d?.category || 'Projects'}
 	</a>
 
 	{#if !d}
@@ -1007,12 +964,21 @@
 
 				<Card.Root>
 					<Card.Header>
-						<Card.Title class="text-base">Category</Card.Title>
-						<Card.Description>Groups this app on the dashboard.</Card.Description>
+						<Card.Title class="text-base">Project</Card.Title>
+						<Card.Description>
+							Joining a project gives this app the project's shared environment variables.
+						</Card.Description>
 					</Card.Header>
-					<Card.Content class="flex max-w-sm gap-2">
-						<Input bind:value={category} placeholder="e.g. Websites, Backends, Clients…" />
-						<Button variant="outline" onclick={saveCategory} disabled={savingCategory}>Save</Button>
+					<Card.Content class="max-w-sm">
+						<select
+							class="border-input h-9 w-full rounded-md border bg-transparent px-2 text-sm"
+							bind:value={category}
+							onchange={saveCategory}
+							disabled={savingCategory}
+						>
+							<option value="">Unassigned</option>
+							{#each d.projects ?? [] as p (p)}<option value={p}>{p}</option>{/each}
+						</select>
 					</Card.Content>
 				</Card.Root>
 
@@ -1061,41 +1027,16 @@
 				<Card.Root>
 					<Card.Header>
 						<Card.Title class="text-base">Environment variables</Card.Title>
-						<Card.Description>Saved with <code>--no-restart</code>; toggle below to restart after saving.</Card.Description>
+						<Card.Description>
+							Saved with <code>--no-restart</code>; toggle below to restart after saving.
+							{#if d.category}
+								Variables marked "project" come from the {d.category} project's shared env;
+								change one here to override it for this app only.
+							{/if}
+						</Card.Description>
 					</Card.Header>
 					<Card.Content class="grid gap-2">
-						{#each rows as row, i (i)}
-							<div class="flex gap-2">
-								<Input class="w-56 font-mono text-xs" placeholder="KEY" bind:value={row.key} />
-								<Input class="flex-1 font-mono text-xs" placeholder="value" bind:value={row.value} />
-								<Button
-									variant="ghost"
-									size="icon"
-									onclick={() => (rows = rows.filter((_, j) => j !== i))}
-									aria-label="Remove variable"
-								>
-									<Trash2Icon class="size-4" />
-								</Button>
-							</div>
-						{:else}
-							<p class="text-muted-foreground text-sm">No variables set.</p>
-						{/each}
-						<div class="mt-2 flex items-center gap-2">
-							<Button variant="outline" size="sm" onclick={() => rows.push({ key: '', value: '' })}>
-								<PlusIcon class="size-4" /> Add variable
-							</Button>
-							<Button variant="outline" size="sm" onclick={() => document.getElementById('env-file')?.click()}>
-								<UploadIcon class="size-4" /> Import .env
-							</Button>
-							<input id="env-file" type="file" accept=".env,text/plain,.txt" class="hidden" onchange={importEnvFile} />
-							<div class="ml-auto flex items-center gap-2">
-								<Switch id="restart" bind:checked={restartAfterSave} />
-								<Label for="restart" class="text-sm">Restart app</Label>
-							</div>
-							<Button size="sm" onclick={saveEnv} disabled={savingEnv}>
-								{savingEnv ? 'Saving…' : 'Save changes'}
-							</Button>
-						</div>
+						<EnvEditor env={editEnv} inheritedEnv={d.projectEnv ?? {}} onsave={saveEnv} />
 						{#if sysEnv.length}
 							<details class="mt-3">
 								<summary class="text-muted-foreground cursor-pointer text-xs">

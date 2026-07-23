@@ -82,6 +82,30 @@ func TestBackupRestoreRoundtrip(t *testing.T) {
 	}
 }
 
+func TestProjectEnvApply(t *testing.T) {
+	oldProj := map[string]string{"A": "1", "B": "2", "C": "3", "D": "4"}
+	newProj := map[string]string{"A": "1", "B": "20", "D": "40", "E": "5"}
+	appEnv := map[string]string{
+		"A":   "1",   // inherited, unchanged -> nothing to do
+		"B":   "2",   // inherited, project changed -> set B=20
+		"C":   "3",   // inherited, project removed -> unset
+		"D":   "999", // app override -> untouched despite project change
+		"OWN": "x",   // app-only key -> untouched
+	}
+	set, unset := projectEnvApply(oldProj, newProj, appEnv)
+	if len(set) != 2 || set["B"] != "20" || set["E"] != "5" {
+		t.Errorf("set = %v, want B=20 E=5", set)
+	}
+	if len(unset) != 1 || unset[0] != "C" {
+		t.Errorf("unset = %v, want [C]", unset)
+	}
+	// app missing an inherited key (e.g. joined late) gets it on next save
+	set, _ = projectEnvApply(oldProj, newProj, map[string]string{})
+	if set["A"] != "1" || set["B"] != "20" {
+		t.Errorf("empty app env should receive all keys, got %v", set)
+	}
+}
+
 func TestNewerVersion(t *testing.T) {
 	cases := []struct {
 		latest, current string
