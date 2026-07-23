@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
+	import { flip } from 'svelte/animate';
+	import { crossfade } from 'svelte/transition';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { api, stream } from '$lib/api';
@@ -84,6 +86,46 @@
 	let installType = $state('');
 	let installing = $state(false);
 	let installLines = $state<string[]>([]);
+
+	// drag a card onto a group to move it; crossfade + flip animate the move
+	const [dndSend, dndReceive] = crossfade({ duration: 250 });
+	let draggingApp = $state('');
+	let dragOverZone = $state<string | null>(null);
+
+	function dragStart(e: DragEvent, app: string) {
+		draggingApp = app;
+		e.dataTransfer!.effectAllowed = 'move';
+		e.dataTransfer!.setData('text/plain', app);
+	}
+	function dragEnd() {
+		draggingApp = '';
+		dragOverZone = null;
+	}
+	function dragOver(e: DragEvent, zone: string) {
+		if (!draggingApp) return;
+		e.preventDefault();
+		e.dataTransfer!.dropEffect = 'move';
+		dragOverZone = zone;
+	}
+	function dragLeave(e: DragEvent, zone: string) {
+		if (dragOverZone === zone && !(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+			dragOverZone = null;
+		}
+	}
+	async function dropApp(e: DragEvent, group: string) {
+		e.preventDefault();
+		const name = draggingApp;
+		dragEnd();
+		const a = apps.find((x) => x.name === name);
+		if (!a || (a.group ?? '') === group) return;
+		a.group = group; // optimistic, so the card animates over immediately
+		try {
+			await api(`/apps/${name}/group`, { method: 'POST', body: JSON.stringify({ group }) });
+		} catch (err) {
+			toast.error(msg(err));
+			await load();
+		}
+	}
 
 	const myApps = $derived(apps.filter((a) => a.category === project));
 	const myServices = $derived(services.filter((s) => s.category === project));
@@ -453,15 +495,40 @@
 			</a>
 		{/snippet}
 
-		{#if baseApps.length}
-			<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-				{#each baseApps as app (app.name)}
+		<div
+			role="list"
+			class="mb-6 grid gap-4 rounded-xl transition-all sm:grid-cols-2 lg:grid-cols-3 {dragOverZone === ''
+				? 'bg-primary/5 ring-primary/40 p-2 ring-2'
+				: ''}"
+			ondragover={(e) => dragOver(e, '')}
+			ondragleave={(e) => dragLeave(e, '')}
+			ondrop={(e) => dropApp(e, '')}
+		>
+			{#each baseApps as app (app.name)}
+				<div
+					role="listitem"
+					draggable={groups.length > 0}
+					ondragstart={(e) => dragStart(e, app.name)}
+					ondragend={dragEnd}
+					animate:flip={{ duration: 250 }}
+					in:dndReceive={{ key: app.name }}
+					out:dndSend={{ key: app.name }}
+					class="transition-opacity {draggingApp === app.name ? 'opacity-40' : ''}"
+				>
 					{@render appCard(app)}
-				{/each}
-			</div>
-		{:else if !groups.length}
-			<p class="text-muted-foreground mb-6 text-sm">No apps in this project yet.</p>
-		{/if}
+				</div>
+			{/each}
+			<button
+				class="text-muted-foreground hover:text-foreground hover:border-muted-foreground/50 flex min-h-24 items-center justify-center gap-2 rounded-xl border border-dashed text-sm transition-colors"
+				onclick={() => {
+					newAppGroup = '';
+					newAppOpen = true;
+				}}
+			>
+				<PlusIcon class="size-4" />
+				{draggingApp ? 'Drop here to ungroup' : 'New app'}
+			</button>
+		</div>
 		{#each groups as g (g)}
 			<div class="mb-3 flex items-center gap-2">
 				<h3 class="text-muted-foreground text-sm font-medium">{g}</h3>
@@ -486,9 +553,28 @@
 					<Trash2Icon class="size-3.5" />
 				</button>
 			</div>
-			<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+			<div
+				role="list"
+				class="mb-6 grid gap-4 rounded-xl transition-all sm:grid-cols-2 lg:grid-cols-3 {dragOverZone === g
+					? 'bg-primary/5 ring-primary/40 p-2 ring-2'
+					: ''}"
+				ondragover={(e) => dragOver(e, g)}
+				ondragleave={(e) => dragLeave(e, g)}
+				ondrop={(e) => dropApp(e, g)}
+			>
 				{#each appsInGroup(g) as app (app.name)}
-					{@render appCard(app)}
+					<div
+						role="listitem"
+						draggable={true}
+						ondragstart={(e) => dragStart(e, app.name)}
+						ondragend={dragEnd}
+						animate:flip={{ duration: 250 }}
+						in:dndReceive={{ key: app.name }}
+						out:dndSend={{ key: app.name }}
+						class="transition-opacity {draggingApp === app.name ? 'opacity-40' : ''}"
+					>
+						{@render appCard(app)}
+					</div>
 				{/each}
 				<button
 					class="text-muted-foreground hover:text-foreground hover:border-muted-foreground/50 flex min-h-24 items-center justify-center gap-2 rounded-xl border border-dashed text-sm transition-colors"
