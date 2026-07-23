@@ -56,6 +56,7 @@ type appInfo struct {
 	Running      bool   `json:"running"`
 	Category     string `json:"category"`
 	Group        string `json:"group"`
+	DBSection    bool   `json:"dbSection"`
 	LastDeploy   string `json:"lastDeploy,omitempty"`
 	LastDeployOK bool   `json:"lastDeployOk"`
 	Maintenance  bool   `json:"maintenance"`
@@ -89,7 +90,7 @@ func handleApps(w http.ResponseWriter, r *http.Request) {
 			running, _ := dokku("ps:report", name, "--running")
 			metaMu.Lock()
 			m := getMeta(name)
-			apps[i] = appInfo{name, running == "true", m.Category, m.Group, m.LastDeploy, m.LastDeployOK, maint[name]}
+			apps[i] = appInfo{name, running == "true", m.Category, m.Group, m.DBSection, m.LastDeploy, m.LastDeployOK, maint[name]}
 			metaMu.Unlock()
 		}(i, name)
 	}
@@ -313,19 +314,26 @@ func handleCategory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// handleAppGroup sets an app's sub-group within its project.
+// handleAppGroup sets an app's sub-group within its project. Setting a group
+// (or none) always places the app back in the Apps section; databases=true
+// moves it under the Databases section instead.
 func handleAppGroup(w http.ResponseWriter, r *http.Request) {
 	name, ok := appName(w, r)
 	if !ok {
 		return
 	}
-	var req struct{ Group string }
+	var req struct {
+		Group     string `json:"group"`
+		Databases bool   `json:"databases"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpErr(w, 400, "bad request")
 		return
 	}
 	metaMu.Lock()
-	getMeta(name).Group = strings.TrimSpace(req.Group)
+	m := getMeta(name)
+	m.Group = strings.TrimSpace(req.Group)
+	m.DBSection = req.Databases
 	err := saveMeta()
 	metaMu.Unlock()
 	if err != nil {

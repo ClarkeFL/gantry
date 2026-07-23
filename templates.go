@@ -18,6 +18,7 @@ type appTemplate struct {
 	Mounts []string          `json:"mounts"`
 	Env    map[string]string `json:"env,omitempty"`
 	Ports  []string          `json:"ports,omitempty"` // "http:80:<container port>"
+	DB     bool              `json:"db"`              // shows under Databases on the project page
 }
 
 var appTemplates = []appTemplate{
@@ -28,23 +29,7 @@ var appTemplates = []appTemplate{
 		Image:  "ghcr.io/muchobien/pocketbase:latest",
 		Mounts: []string{"/pb_data"},
 		Ports:  []string{"http:80:8090"},
-	},
-	{
-		ID:     "uptime-kuma",
-		Label:  "Uptime Kuma",
-		Blurb:  "Self-hosted uptime monitoring with status pages and alerts.",
-		Image:  "louislam/uptime-kuma:1",
-		Mounts: []string{"/app/data"},
-		Ports:  []string{"http:80:3001"},
-	},
-	{
-		ID:     "n8n",
-		Label:  "n8n",
-		Blurb:  "Workflow automation: connect apps and APIs with a visual editor.",
-		Image:  "docker.n8n.io/n8nio/n8n:latest",
-		Mounts: []string{"/home/node/.n8n"},
-		Env:    map[string]string{"N8N_SECURE_COOKIE": "false"},
-		Ports:  []string{"http:80:5678"},
+		DB:     true,
 	},
 }
 
@@ -84,6 +69,7 @@ func handleTemplateCreate(w http.ResponseWriter, r *http.Request) {
 	m.Category = strings.TrimSpace(req.Category)
 	m.Group = strings.TrimSpace(req.Group)
 	m.Image = tpl.Image
+	m.DBSection = tpl.DB
 	err := saveMeta()
 	metaMu.Unlock()
 	if err != nil {

@@ -31,8 +31,9 @@ type cronJob struct {
 }
 
 type appMeta struct {
-	Category   string    `json:"category,omitempty"` // project the app belongs to
-	Group      string    `json:"group,omitempty"`    // optional sub-group within the project
+	Category   string    `json:"category,omitempty"`   // project the app belongs to
+	Group      string    `json:"group,omitempty"`      // optional sub-group within the project
+	DBSection  bool      `json:"db_section,omitempty"` // shown under Databases on the project page
 	Jobs       []cronJob `json:"jobs,omitempty"`
 	Repo       string    `json:"repo,omitempty"`
 	Ref        string    `json:"ref,omitempty"`
