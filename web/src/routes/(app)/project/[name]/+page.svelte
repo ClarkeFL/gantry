@@ -384,6 +384,9 @@
 				<KeyIcon class="size-4" /> Shared env
 				<Badge variant="secondary">{Object.keys(env).length}</Badge>
 			</Button>
+			<Button variant="outline" size="sm" onclick={() => (newGroupOpen = true)}>
+				<FolderPlusIcon class="size-4" /> New group
+			</Button>
 			<Button
 				size="sm"
 				onclick={() => {
@@ -450,11 +453,6 @@
 			</a>
 		{/snippet}
 
-		<div class="mb-3 flex items-center border-b pb-2">
-			<Button variant="ghost" size="sm" class="text-muted-foreground ml-auto" onclick={() => (newGroupOpen = true)}>
-				<FolderPlusIcon class="size-4" /> New group
-			</Button>
-		</div>
 		{#if baseApps.length}
 			<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 				{#each baseApps as app (app.name)}
