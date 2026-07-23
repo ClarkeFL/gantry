@@ -156,7 +156,19 @@ func handleProjectDelete(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "project name required")
 		return
 	}
+	// only empty projects can be deleted, so nothing ever becomes unassigned
+	if len(projectApps(req.Name)) > 0 {
+		httpErr(w, 409, "project still has apps, move or destroy them first")
+		return
+	}
 	settingsMu.Lock()
+	for k, v := range settings.DBCategory {
+		if strings.EqualFold(v, req.Name) {
+			settingsMu.Unlock()
+			httpErr(w, 409, "project still has databases, move or destroy them first: "+k)
+			return
+		}
+	}
 	kept := settings.Projects[:0]
 	for _, c := range settings.Projects {
 		if !strings.EqualFold(c, req.Name) {
@@ -164,33 +176,10 @@ func handleProjectDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	settings.Projects = kept
-	for k, v := range settings.DBCategory {
-		if strings.EqualFold(v, req.Name) {
-			delete(settings.DBCategory, k)
-		}
-	}
 	delete(settings.ProjectEnv, req.Name)
 	delete(settings.ProjectGroups, req.Name)
 	err := saveSettings()
 	settingsMu.Unlock()
-	if err != nil {
-		httpErr(w, 500, err.Error())
-		return
-	}
-	// apps in the deleted project fall back to Unassigned; their env is left
-	// untouched so nothing breaks
-	metaMu.Lock()
-	changed := false
-	for _, m := range meta {
-		if strings.EqualFold(m.Category, req.Name) {
-			m.Category = ""
-			changed = true
-		}
-	}
-	if changed {
-		err = saveMeta()
-	}
-	metaMu.Unlock()
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return

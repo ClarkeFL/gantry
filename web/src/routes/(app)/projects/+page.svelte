@@ -9,13 +9,9 @@
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-	import BoxIcon from '@lucide/svelte/icons/box';
-	import DatabaseIcon from '@lucide/svelte/icons/database';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
-	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
-	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import InfoTip from '$lib/components/info-tip.svelte';
 
 	type App = { name: string; running: boolean; category: string; lastDeployOk: boolean; maintenance: boolean };
@@ -29,9 +25,6 @@
 	let newProjOpen = $state(false);
 	let newProjName = $state('');
 	let creating = $state(false);
-
-	const unassignedApps = $derived(apps.filter((a) => !a.category));
-	const unassignedServices = $derived(services.filter((s) => !s.category));
 
 	function projApps(p: string) {
 		return apps.filter((a) => a.category === p);
@@ -82,36 +75,14 @@
 	}
 
 	async function deleteProject(name: string) {
-		const ok = await askConfirm(
-			`Delete project "${name}"? Its apps and databases are kept and move to Unassigned. Their env vars stay as they are.`
-		);
-		if (!ok) return;
+		if (projApps(name).length || projServices(name).length) {
+			toast.error('Move or destroy its apps and databases first, a project must be empty to delete it.');
+			return;
+		}
+		if (!(await askConfirm(`Delete project "${name}"?`))) return;
 		try {
 			await api('/projects', { method: 'DELETE', body: JSON.stringify({ name }) });
 			toast.success(`Deleted "${name}"`);
-			await load();
-		} catch (e) {
-			toast.error(msg(e));
-		}
-	}
-
-	async function assignApp(app: string, project: string) {
-		try {
-			await api(`/apps/${app}/category`, { method: 'POST', body: JSON.stringify({ category: project }) });
-			toast.success(`Moved ${app} to ${project}`);
-			await load();
-		} catch (e) {
-			toast.error(msg(e));
-		}
-	}
-
-	async function assignService(s: Service, project: string) {
-		try {
-			await api('/services/category', {
-				method: 'POST',
-				body: JSON.stringify({ type: s.type, name: s.name, category: project })
-			});
-			toast.success(`Moved ${s.name} to ${project}`);
 			await load();
 		} catch (e) {
 			toast.error(msg(e));
@@ -154,20 +125,8 @@
 							<Card.Title class="flex items-center gap-2 text-base">
 								<FolderIcon class="text-muted-foreground size-4 shrink-0" />
 								<span class="truncate">{p}</span>
-								{#if pApps.length}
-									<span
-										class="ml-auto size-2 shrink-0 rounded-full {runningCount === pApps.length
-											? 'bg-emerald-500'
-											: runningCount
-												? 'bg-amber-500'
-												: 'bg-red-500'}"
-										title="{runningCount} of {pApps.length} apps running"
-									></span>
-								{/if}
 								<button
-									class="text-muted-foreground hover:text-destructive shrink-0 opacity-0 transition-opacity group-hover:opacity-100 {pApps.length
-										? ''
-										: 'ml-auto'}"
+									class="text-muted-foreground hover:text-destructive ml-auto shrink-0"
 									onclick={(e) => {
 										e.preventDefault();
 										deleteProject(p);
@@ -184,16 +143,35 @@
 								{pSvcs.length === 1 ? 'database' : 'databases'}
 							</Card.Description>
 						</Card.Header>
-						{#if members.length}
-							<Card.Content class="flex flex-wrap gap-1.5">
-								{#each members.slice(0, 5) as m (m)}
-									<span class="bg-muted/60 text-muted-foreground rounded px-1.5 py-0.5 font-mono text-xs">{m}</span>
-								{/each}
-								{#if members.length > 5}
-									<span class="text-muted-foreground px-1 py-0.5 text-xs">+{members.length - 5} more</span>
-								{/if}
-							</Card.Content>
-						{/if}
+						<Card.Content class="flex items-end gap-1.5">
+							{#if members.length}
+								<div class="flex flex-wrap gap-1.5">
+									{#each members.slice(0, 5) as m (m)}
+										<span class="bg-muted/60 text-muted-foreground rounded px-1.5 py-0.5 font-mono text-xs">{m}</span>
+									{/each}
+									{#if members.length > 5}
+										<span class="text-muted-foreground px-1 py-0.5 text-xs">+{members.length - 5} more</span>
+									{/if}
+								</div>
+							{/if}
+							{#if pApps.length}
+								<span
+									class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs font-medium {runningCount === pApps.length
+										? 'bg-emerald-500/15 text-emerald-500'
+										: runningCount
+											? 'bg-amber-500/15 text-amber-500'
+											: 'bg-red-500/15 text-red-500'}"
+								>
+									{runningCount === pApps.length
+										? pApps.length === 1
+											? 'running'
+											: 'all running'
+										: runningCount
+											? `${runningCount}/${pApps.length} running`
+											: 'stopped'}
+								</span>
+							{/if}
+						</Card.Content>
 					</Card.Root>
 				</a>
 			{:else}
@@ -203,59 +181,6 @@
 			{/each}
 		</div>
 
-		{#if unassignedApps.length || unassignedServices.length}
-			<h2 class="text-muted-foreground mt-10 mb-2 text-xs font-medium tracking-widest uppercase">
-				Unassigned
-			</h2>
-			<div class="divide-border overflow-hidden rounded-lg border divide-y">
-				{#each unassignedApps as a (a.name)}
-					<div class="bg-muted/30 flex items-center gap-2 px-3 py-2">
-						<BoxIcon class="text-muted-foreground size-4 shrink-0" />
-						<a href="/app/{a.name}" class="truncate text-sm hover:underline">{a.name}</a>
-						<span
-							class="size-2 shrink-0 rounded-full {a.running ? 'bg-emerald-500' : 'bg-red-500'}"
-							title={a.running ? 'running' : 'stopped'}
-						></span>
-						{#if projects.length}
-							<select
-								class="border-input text-muted-foreground ml-auto h-7 rounded-md border bg-transparent px-2 text-xs"
-								value=""
-								onchange={(e) => {
-									const p = (e.target as HTMLSelectElement).value;
-									if (p) assignApp(a.name, p);
-								}}
-							>
-								<option value="">Add to project…</option>
-								{#each projects as p (p)}<option value={p}>{p}</option>{/each}
-							</select>
-						{/if}
-					</div>
-				{/each}
-				{#each unassignedServices as s (s.type + s.name)}
-					<div class="bg-muted/30 flex items-center gap-2 px-3 py-2">
-						<DatabaseIcon class="text-muted-foreground size-4 shrink-0" />
-						<span class="truncate text-sm">{s.name}</span>
-						<span class="text-muted-foreground text-xs">{s.type}</span>
-						{#if projects.length}
-							<select
-								class="border-input text-muted-foreground ml-auto h-7 rounded-md border bg-transparent px-2 text-xs"
-								value=""
-								onchange={(e) => {
-									const p = (e.target as HTMLSelectElement).value;
-									if (p) assignService(s, p);
-								}}
-							>
-								<option value="">Add to project…</option>
-								{#each projects as p (p)}<option value={p}>{p}</option>{/each}
-							</select>
-						{/if}
-					</div>
-				{/each}
-			</div>
-			<p class="text-muted-foreground mt-2 text-xs">
-				Apps and databases that aren't in any project yet. Pick a project to move them in.
-			</p>
-		{/if}
 	{/if}
 </div>
 

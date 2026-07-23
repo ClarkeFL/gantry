@@ -24,6 +24,7 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
+	import CheckIcon from '@lucide/svelte/icons/check';
 
 	type App = { name: string; running: boolean; category: string; group: string; lastDeploy?: string; lastDeployOk: boolean; maintenance: boolean };
 	type Service = { type: string; name: string; status: string; category: string; links: string[] };
@@ -51,6 +52,10 @@
 	let newGroupOpen = $state(false);
 	let newGroupName = $state('');
 	let creatingGroup = $state(false);
+
+	// add-apps-to-group dialog
+	let groupAddOpen = $state(false);
+	let groupTarget = $state('');
 
 	// rename dialog
 	let renameOpen = $state(false);
@@ -394,17 +399,6 @@
 								last deploy failed
 							</span>
 						{/if}
-						{#if groups.length}
-							<select
-								class="border-input text-muted-foreground ml-auto h-7 rounded-md border bg-transparent px-2 text-xs"
-								value={app.group && groups.includes(app.group) ? app.group : ''}
-								onchange={(e) => setGroup(app.name, (e.target as HTMLSelectElement).value)}
-								title="Group within this project"
-							>
-								<option value="">No group</option>
-								{#each groups as g (g)}<option value={g}>{g}</option>{/each}
-							</select>
-						{/if}
 					</Card.Description>
 				</Card.Header>
 				{#if linkedDbs(app.name).length}
@@ -456,17 +450,20 @@
 					<Trash2Icon class="size-3.5" />
 				</button>
 			</div>
-			{#if appsInGroup(g).length}
-				<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-					{#each appsInGroup(g) as app (app.name)}
-						{@render appCard(app)}
-					{/each}
-				</div>
-			{:else}
-				<p class="text-muted-foreground mb-6 text-sm">
-					Empty group. Use the group dropdown on an app card to move apps here.
-				</p>
-			{/if}
+			<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+				{#each appsInGroup(g) as app (app.name)}
+					{@render appCard(app)}
+				{/each}
+				<button
+					class="text-muted-foreground hover:text-foreground hover:border-muted-foreground/50 flex min-h-24 items-center justify-center gap-2 rounded-xl border border-dashed text-sm transition-colors"
+					onclick={() => {
+						groupTarget = g;
+						groupAddOpen = true;
+					}}
+				>
+					<PlusIcon class="size-4" /> Add app
+				</button>
+			</div>
 		{/each}
 
 		<div class="mb-3 flex items-center gap-2 border-b pb-2">
@@ -586,6 +583,35 @@
 			<Input bind:value={renameTo} required placeholder={project} />
 			<Button type="submit" disabled={renaming}>{renaming ? 'Renaming…' : 'Rename'}</Button>
 		</form>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={groupAddOpen}>
+	<Dialog.Content class="max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>Add apps to {groupTarget}</Dialog.Title>
+			<Dialog.Description>Click an app to move it in or out of this group.</Dialog.Description>
+		</Dialog.Header>
+		<div class="divide-border overflow-hidden rounded-lg border divide-y">
+			{#each myApps as app (app.name)}
+				{@const inGroup = app.group === groupTarget}
+				<button
+					class="bg-muted/30 hover:bg-muted/60 flex w-full items-center gap-2 px-3 py-2 text-left"
+					onclick={() => setGroup(app.name, inGroup ? '' : groupTarget)}
+				>
+					<BoxIcon class="text-muted-foreground size-4 shrink-0" />
+					<span class="truncate text-sm">{app.name}</span>
+					{#if app.group && !inGroup}
+						<span class="text-muted-foreground text-xs">in {app.group}</span>
+					{/if}
+					{#if inGroup}
+						<CheckIcon class="ml-auto size-4 shrink-0 text-emerald-500" />
+					{/if}
+				</button>
+			{:else}
+				<p class="text-muted-foreground px-3 py-2 text-sm">No apps in this project yet.</p>
+			{/each}
+		</div>
 	</Dialog.Content>
 </Dialog.Root>
 
