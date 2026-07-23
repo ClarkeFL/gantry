@@ -581,7 +581,7 @@
 		try {
 			await api(`/apps/${name}`, { method: 'DELETE' });
 			toast.success(`Destroyed ${name}`);
-			goto('/projects');
+			goto(d?.category ? `/project/${encodeURIComponent(d.category)}` : '/projects');
 		} catch (e) {
 			toast.error(msg(e));
 			destroying = false;
