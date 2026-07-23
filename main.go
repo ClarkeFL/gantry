@@ -95,6 +95,8 @@ func main() {
 		"PUT /api/projects/{name}/groups":    handleProjectGroupRename,
 		"DELETE /api/projects/{name}/groups": handleProjectGroupDelete,
 		"POST /api/apps/{name}/group":        handleAppGroup,
+		"GET /api/templates":                 handleTemplatesGet,
+		"POST /api/templates":                handleTemplateCreate,
 		"GET /api/services":                  handleServicesGet,
 		"DELETE /api/apps/{name}":            handleAppDestroy,
 		"DELETE /api/services":               handleServiceDestroy,

@@ -27,6 +27,7 @@
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
 	import KeyIcon from '@lucide/svelte/icons/key-round';
+	import LayoutTemplateIcon from '@lucide/svelte/icons/layout-template';
 
 	type App = { name: string; running: boolean; category: string; group: string; lastDeploy?: string; lastDeployOk: boolean; maintenance: boolean };
 	type Service = { type: string; name: string; status: string; category: string; links: string[] };
@@ -73,6 +74,14 @@
 	let newAppName = $state('');
 	let newAppGroup = $state('');
 	let creatingApp = $state(false);
+
+	// template dialog
+	type Template = { id: string; label: string; blurb: string; image: string };
+	let templates = $state<Template[]>([]);
+	let tplOpen = $state(false);
+	let tplSel = $state<Template | null>(null);
+	let tplName = $state('');
+	let creatingTpl = $state(false);
 
 	// create database dialog
 	let createOpen = $state(false);
@@ -146,10 +155,11 @@
 	async function load() {
 		loading = true;
 		try {
-			const [a, s, p] = await Promise.all([
+			const [a, s, p, t] = await Promise.all([
 				api('/apps'),
 				api('/services'),
-				api(`/projects/${encodeURIComponent(project)}`)
+				api(`/projects/${encodeURIComponent(project)}`),
+				api('/templates')
 			]);
 			apps = a.apps ?? [];
 			services = s.services ?? [];
@@ -157,6 +167,7 @@
 			plugins = s.plugins ?? {};
 			env = p.env ?? {};
 			groups = p.groups ?? [];
+			templates = t.templates ?? [];
 		} finally {
 			loading = false;
 		}
@@ -191,6 +202,26 @@
 			await load();
 		} catch (e) {
 			toast.error(msg(e));
+		}
+	}
+
+	async function createFromTemplate(e: SubmitEvent) {
+		e.preventDefault();
+		if (!tplSel) return;
+		creatingTpl = true;
+		const n = tplName.trim();
+		try {
+			await api('/templates', {
+				method: 'POST',
+				body: JSON.stringify({ template: tplSel.id, name: n, category: project })
+			});
+			toast.success(`Created ${n} from the ${tplSel.label} template, deploying`);
+			tplOpen = false;
+			goto(`/app/${n}?tab=deploys&autodeploy=1`);
+		} catch (e) {
+			toast.error(msg(e));
+		} finally {
+			creatingTpl = false;
 		}
 	}
 
@@ -690,8 +721,66 @@
 				{/if}
 			</p>
 		{/if}
+
+		{#if templates.length}
+			<div class="mt-8 mb-3 flex items-center gap-2 border-b pb-2">
+				<LayoutTemplateIcon class="text-muted-foreground size-4" />
+				<h2 class="flex items-center gap-1.5 text-lg font-semibold tracking-tight">
+					Templates
+					<InfoTip
+						text="One-click apps. Creating one sets up the docker image, persistent storage and ports for you, then deploys it into this project."
+					/>
+				</h2>
+			</div>
+			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+				{#each templates as t (t.id)}
+					<button
+						class="hover:border-muted-foreground/50 rounded-xl border border-dashed p-4 text-left transition-colors"
+						onclick={() => {
+							tplSel = t;
+							tplName = t.id;
+							tplOpen = true;
+						}}
+					>
+						<div class="flex items-center gap-2 text-sm font-medium">
+							<PlusIcon class="text-muted-foreground size-4" />
+							{t.label}
+						</div>
+						<p class="text-muted-foreground mt-1 text-xs">{t.blurb}</p>
+					</button>
+				{/each}
+			</div>
+		{/if}
 	{/if}
 </div>
+
+<Dialog.Root bind:open={tplOpen}>
+	<Dialog.Content class="max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>New {tplSel?.label} in {project}</Dialog.Title>
+			<Dialog.Description>
+				{tplSel?.blurb} Storage and ports are set up automatically, then it deploys.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form onsubmit={createFromTemplate} class="grid gap-4">
+			<div class="grid gap-2">
+				<Label for="tpl-name">Name</Label>
+				<Input
+					id="tpl-name"
+					bind:value={tplName}
+					required
+					pattern="[a-z0-9][a-z0-9.-]*"
+					autocapitalize="off"
+					autocorrect="off"
+					spellcheck={false}
+				/>
+			</div>
+			<Button type="submit" disabled={creatingTpl}>
+				{creatingTpl ? 'Creating…' : 'Create & deploy'}
+			</Button>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
 
 <Dialog.Root bind:open={renameOpen}>
 	<Dialog.Content class="max-w-sm">

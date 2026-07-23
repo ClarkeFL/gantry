@@ -289,7 +289,12 @@
 		}
 	}
 	onMount(() => {
-		load().catch((e) => toast.error(msg(e)));
+		load()
+			.then(() => {
+				// template flow lands here with ?autodeploy=1 for the first deploy
+				if (page.url.searchParams.get('autodeploy') === '1' && !deploying) startDeploy();
+			})
+			.catch((e) => toast.error(msg(e)));
 	});
 	onDestroy(() => {
 		stopLogs?.();
